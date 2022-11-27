@@ -2,13 +2,22 @@ import * as vscode from "vscode";
 import { EventEmitter, Event } from "vscode";
 import * as path from 'path';
 import { InspectFunction } from "./DekuIntegration";
+import { time } from "console";
 
 export class LensInspectionAtTime {
-	time!: string;
+	time!: number;
+	textTime!: string;
+	fun: LensInspectionFunction;
 	lines: Map<number, string[]> = new Map<number, string[]>();
+	stacktrace: string[] = [];
+	stacktraceSum = 0;
+	returnAtLine = 0;
+	returnTime!: number;
 
-	public constructor(time: string) {
+	public constructor(fun: LensInspectionFunction, time: number, textTime: string) {
+		this.fun = fun;
 		this.time = time;
+		this.textTime = textTime;
 	}
 }
 
@@ -16,6 +25,12 @@ class LensInspectionFunction {
 	name!: string;
 	range: number[] = [];
 	times: LensInspectionAtTime[] = [];
+	showInspectFor!: LensInspectionAtTime;
+
+	public currentTime()
+	{
+		return this.times[this.times.length - 1];
+	}
 }
 
 class LensInspectionFile {
@@ -28,6 +43,14 @@ class LensInspectionFile {
 	}
 }
 
+class ReturnItem {
+	public constructor(public time: LensInspectionAtTime) {}
+}
+
+class StacktraceItem {
+	public constructor(public time: LensInspectionAtTime) {}
+}
+
 export class LensInspectionRoot {
 	files: LensInspectionFile[] = [];
 
@@ -37,6 +60,21 @@ export class LensInspectionRoot {
 			if (file.file == filePath) {
 				file.functions.forEach(func => {
 					if (func.range[0] <= line && func.range[1] >= line) {
+						result = func;
+						return;
+					}
+				});
+			}
+		});
+		return result;
+	}
+
+	public getFunction(filePath: string, name: string): LensInspectionFunction | undefined {
+		let result;
+		this.files.forEach(file => {
+			if (file.file == filePath) {
+				file.functions.forEach(func => {
+					if (func.name == name) {
 						result = func;
 						return;
 					}
@@ -64,6 +102,7 @@ export class LensInspectionRoot {
 		inspectFunc = new LensInspectionFunction();
 		inspectFunc.name = funName;
 		inspectFunc.range = [lineStart, lineEnd];
+		inspectFunc.showInspectFor = new LensInspectionAtTime(inspectFunc, 0, "");
 
 		this.files.forEach(file => {
 			if (file.file == filePath) {
@@ -97,7 +136,7 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 			const titem = new vscode.TreeItem(
 				item.name,
 				item.times.length > 1
-					? vscode.TreeItemCollapsibleState.Expanded
+					? vscode.TreeItemCollapsibleState.Collapsed
 					: vscode.TreeItemCollapsibleState.None
 			);
 			if (item.times.length == 1)
@@ -111,7 +150,7 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 			return titem;
 		} else if (item instanceof LensInspectionAtTime) {
 			const titem = new vscode.TreeItem(
-				item.time, vscode.TreeItemCollapsibleState.None
+				item.textTime, vscode.TreeItemCollapsibleState.None
 			);
 			titem.command = {
 				command: 'kernelinspect.show_inspect_for',
@@ -120,6 +159,7 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 				tooltip: 'Open FTP Resource1'
 			};
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
+			titem.description = ((item.time - item.returnTime)*100).toFixed(3)+"ms";
 			return titem;
 		}
 		else
@@ -136,7 +176,6 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 			childs = this.inspections?.functions;
 		return Promise.resolve(childs);
 	}
-
 }
 
 export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
@@ -158,7 +197,7 @@ export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
 		if (item instanceof InspectFunction) {
 			const titem = new vscode.TreeItem(
 				item.file,
-				vscode.TreeItemCollapsibleState.Expanded
+				vscode.TreeItemCollapsibleState.Collapsed
 			);
 			return titem;
 		}
@@ -168,6 +207,7 @@ export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
 			arguments: [item.file, item.fun],
 			title: 'Open inspected function',
 		};
+		titem.resourceUri = vscode.Uri.parse(item.file+"_AAA");
 		return titem;
 	}
 
@@ -177,6 +217,178 @@ export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
 			childs = element.file;
 		else
 			childs = this.inspections;
+		return Promise.resolve(childs);
+	}
+}
+
+export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
+
+	private changeEvent = new EventEmitter<void>();
+
+	constructor(private inspections: LensInspectionFile | undefined) {
+	}
+
+	public get onDidChangeTreeData(): Event<void> {
+		return this.changeEvent.event;
+	}
+	public refresh(inspectsForFile: LensInspectionFile | undefined): any {
+		this.inspections = inspectsForFile;
+		this.changeEvent.fire();
+	}
+
+	getTreeItem(item: any): vscode.TreeItem {
+		if (item instanceof LensInspectionFunction) {
+			const titem = new vscode.TreeItem(
+				item.name,
+				item.times.length > 1
+					? vscode.TreeItemCollapsibleState.Collapsed
+					: vscode.TreeItemCollapsibleState.None
+			);
+			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+			return titem;
+		} else if (item instanceof ReturnItem) {
+			const titem = new vscode.TreeItem(
+				"return at line: "+item.time.returnAtLine, vscode.TreeItemCollapsibleState.Collapsed
+			);
+			return titem;
+		} else if (item instanceof LensInspectionAtTime) {
+			const titem = new vscode.TreeItem(
+				item.textTime, vscode.TreeItemCollapsibleState.None
+			);
+			titem.command = {
+				command: 'kernelinspect.show_inspect_for',
+				arguments: [item],
+				title: 'Open FTP Resource',
+				tooltip: 'Open FTP Resource1'
+			};
+			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
+			return titem;
+		}
+		else
+			return new vscode.TreeItem("Unknown");
+	}
+
+	getChildren(element?: any): Thenable<[]> {
+		let childs: any;
+		if (element instanceof LensInspectionFunction) {
+			const retLines: number[] = [];
+			const items: ReturnItem[] = [];
+			element.times.forEach(time => {
+				if (!retLines.includes(time.returnAtLine)) {
+					retLines.push(time.returnAtLine);
+					items.push(new ReturnItem(time));
+				}
+			});
+			if (retLines.length > 1) {
+				childs = items;
+			}
+		} else if (element instanceof ReturnItem) {
+			const items: LensInspectionAtTime[] = [];
+			element.time.fun.times.forEach(time => {
+				if (time.returnAtLine == element.time.returnAtLine) {
+					items.push(time);
+				}
+			});
+			childs = items;
+		} else if (this.inspections) {
+			const items: LensInspectionFunction[] = [];
+			this.inspections?.functions.forEach(func => {
+				const firstRet = func.times[0].returnAtLine;
+				for (let i = 1; i < func.times.length; i++) {
+					if (func.times[i].returnAtLine != firstRet) {
+						items.push(func);
+						break;
+					}
+				}
+			});
+			childs = items;
+		}
+		return Promise.resolve(childs);
+	}
+}
+
+export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
+
+	private changeEvent = new EventEmitter<void>();
+
+	constructor(private inspections: LensInspectionFile | undefined) {
+	}
+
+	public get onDidChangeTreeData(): Event<void> {
+		return this.changeEvent.event;
+	}
+	public refresh(inspectsForFile: LensInspectionFile | undefined): any {
+		this.inspections = inspectsForFile;
+		this.changeEvent.fire();
+	}
+
+	getTreeItem(item: any): vscode.TreeItem {
+		if (item instanceof LensInspectionFunction) {
+			const titem = new vscode.TreeItem(
+				item.name,
+				item.times.length > 1
+					? vscode.TreeItemCollapsibleState.Collapsed
+					: vscode.TreeItemCollapsibleState.None
+			);
+			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+			return titem;
+		} else if (item instanceof StacktraceItem) {
+			const titem = new vscode.TreeItem(
+				"stacktrace: #"+item.time.stacktraceSum, vscode.TreeItemCollapsibleState.Collapsed
+			);
+			return titem;
+		} else if (item instanceof LensInspectionAtTime) {
+			const titem = new vscode.TreeItem(
+				item.textTime, vscode.TreeItemCollapsibleState.None
+			);
+			titem.command = {
+				command: 'kernelinspect.show_inspect_for',
+				arguments: [item],
+				title: 'Open FTP Resource',
+				tooltip: 'Open FTP Resource1'
+			};
+			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
+			return titem;
+		}
+		else
+			return new vscode.TreeItem("Unknown");
+	}
+
+	getChildren(element?: any): Thenable<[]> {
+		let childs: any;
+		if (element instanceof LensInspectionFunction) {
+			const stackSum: number[] = [];
+			const items: StacktraceItem[] = [];
+			element.times.forEach(time => {
+				if (!stackSum.includes(time.stacktraceSum)) {
+					stackSum.push(time.stacktraceSum);
+					items.push(new StacktraceItem(time));
+				}
+			});
+			if (stackSum.length > 1) {
+				childs = items;
+			}
+		} else if (element instanceof StacktraceItem) {
+			const items: LensInspectionAtTime[] = [];
+			element.time.fun.times.forEach(time => {
+				if (time.stacktraceSum == element.time.stacktraceSum) {
+					items.push(time);
+				}
+			});
+			childs = items;
+		} else if (this.inspections) {
+			const items: LensInspectionFunction[] = [];
+			this.inspections?.functions.forEach(func => {
+				const firstSum = func.times[0].stacktraceSum;
+				for (let i = 1; i < func.times.length; i++) {
+					if (func.times[i].stacktraceSum != firstSum) {
+						items.push(func);
+						break;
+					}
+				}
+			});
+			childs = items;
+		}
 		return Promise.resolve(childs);
 	}
 }
