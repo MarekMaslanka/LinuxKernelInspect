@@ -26,7 +26,7 @@ export default class implements FileDecorationProvider, Disposable {
 
     provideFileDecoration(uri: Uri): FileDecoration | undefined {
 	if (uri.toString().includes("AAA"))
-		return this.getDecorator('U', 'gitDecoration.untrackedResourceForeground');
+		return this.getDecorator(uri.query.substring(0, 6), 'gitDecoration.untrackedResourceForeground');
 	return undefined;
     }
 

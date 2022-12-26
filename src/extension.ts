@@ -7,6 +7,7 @@ import { generateFunctionList } from "./parser";
 import { setupStatusbar } from "./statusbar";
 import { Database } from "./db";
 import TreeDecorationProvider from "./TreeDecorationProvider";
+import SqlSideViewProvider from "./SqlSideView";
 // import { CodelensProvider } from './CodelensProvider';
 
 const inspectFiles = new InspectFiles();
@@ -32,6 +33,7 @@ const inspects = new outline.LensInspectionRoot();
 const treeProvider = new outline.InspectOutlineProvider(undefined);
 const kernelInspectTreeProvider = new outline.KernelInspectTreeProvider(undefined);
 const functionReturnsTreeProvider = new outline.ReturnsOutlineProvider(undefined);
+const stacktraceTreeProvider = new outline.StacktraceTreeProvider(undefined);
 
 const DB = new Database();
 
@@ -56,6 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
 			decorate(editor);
 			refreshOutline();
 			showInspectsForCurrentEditor();
+			sqlProvider.activatedFile(vscode.workspace.asRelativePath(editor.document.uri));
 		}
 	}, null, context.subscriptions);
 
@@ -66,6 +69,39 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}, null, context.subscriptions);
 
+	const sqlProvider = new SqlSideViewProvider(context.extensionUri, DB, trial => {
+		const time = inspects.findTrial(vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri), trial);
+		if (!time) {
+			vscode.window.showErrorMessage("Unknown error");
+			return;
+		}
+
+		///////////////
+
+		time.fun.showInspectFor = time;
+		const lines = new Map<number, string[]>();
+		inspects.files.forEach(file => {
+			if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri))
+				file.functions.forEach(func => {
+					func.showInspectFor.lines.forEach((values, line) => {
+						lines.set(line, values);
+					});
+				});
+		});
+		showInspectInformation(lines);
+		const editor = vscode.window.activeTextEditor;
+		const visibleLines = editor?.visibleRanges;
+		const range = new vscode.Range(time.fun.range[0] - 1, 0, time.fun.range[1], 0);
+		if (!visibleLines![0].intersection(range))
+			editor!.revealRange(range);
+	});
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(
+			"kernelInspect-sqlSidebar",
+			sqlProvider
+		)
+	);
+
 	context.subscriptions.push(
 		new TreeDecorationProvider(),
 		vscode.languages.registerCodeActionsProvider({ language: "c", scheme: "file" }, new LinuxKernelInspector(), {
@@ -75,7 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.commands.registerCommand('kernelinspect.inspect_function', (path: string, fun: string, pattern: string) => {
 		inspectFiles.addInspect(path, fun, pattern);
 		kernelInspectTreeProvider.refresh(inspectFiles.inspections);
-		// startInspecting();
+		startInspecting();
 	});
 
 	vscode.commands.registerCommand('outliner.outline', () => {
@@ -122,13 +158,17 @@ export function activate(context: vscode.ExtensionContext) {
 		"functionReturnsTreeProvider",
 		functionReturnsTreeProvider
 	);
+	vscode.window.registerTreeDataProvider(
+		"functionStacktraceTreeProvider",
+		stacktraceTreeProvider
+	);
 
 	vscode.languages.registerHoverProvider('c', {
 		provideHover(document, position, token) {
 			const range = document.getWordRangeAtPosition(position);
 			const word = document.getText(range);
 			const fun = inspects.findFunction(vscode.workspace.asRelativePath(document.uri), position.line + 1);
-			if (!fun/* && fun!.name != word*/)
+			if (!fun || fun.range[0] != position.line + 1/* && fun!.name != word*/)
 				return undefined;
 			// https://stackoverflow.com/questions/54792391/vs-code-hover-extension-implement-hoverprovider
 			const markdown = new vscode.MarkdownString(`<span style="color:#fff;background-color:#666;">&nbsp;&nbsp;&nbsp;Stack trace:&nbsp;&nbsp;&nbsp;</span>`);
@@ -145,6 +185,35 @@ export function activate(context: vscode.ExtensionContext) {
 
 	setupStatusbar(context.subscriptions, activeEditor);
 	runListenenServer(0);
+
+	DB.getAllTrials(row => {
+		// console.log(row);
+		const func = inspects.getOrCreateFunc(row.path, row.name, row.line_start, row.line_end);
+		const time = row.time as number;
+		const timeStr = time.toString();
+		const trial = new outline.LensInspectionAtTime(func, time, timeStr);
+		trial.returnAtLine = row.return_line ? row.return_line : row.line_end;
+		trial.returnTime = row.return_time;
+		trial.stacktrace = row.stacktrace;
+		trial.stacktraceSum = row.stacktraceSum;
+		const trialIndex = func.times.length;
+		func.times.push(trial);
+		addInspectForTrial(trial, row.line_start, "execute time: "+"execTime");
+		if (row.return_line) {
+			addInspectForTrial(trial, row.line_end, "return here");
+		}
+		DB.getInspects(row.trial_id, row => {
+			// console.log(row);
+			const msg = row.var_name + ": " + row.var_value;
+
+			addInspectForTrial(trial, row.line, msg);
+		});
+	});
+}
+
+function addInspectForTrial(trial: outline.LensInspectionAtTime, line: number, value: string, name?: string) {
+	const vars = trial.lines.get(line) != undefined ? trial.lines.get(line) : trial.lines.set(line, []).get(line);
+	vars!.push(value);
 }
 
 function getDecorationMessage(msg: any) {
@@ -202,11 +271,13 @@ function refreshOutline() {
 		if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri)) {
 			treeProvider.refresh(file);
 			functionReturnsTreeProvider.refresh(file);
+			stacktraceTreeProvider.refresh(file);
 			return;
 		}
 	}
 	treeProvider.refresh(undefined);
 	functionReturnsTreeProvider.refresh(undefined);
+	stacktraceTreeProvider.refresh(undefined);
 }
 
 function showInspectInformation(lines: Map<number, string[]>) {
@@ -262,145 +333,169 @@ function decimalHexTwosComplement(decimal: number) {
 	}
 }
 
+function parseLine(line: string) : [boolean, boolean]{
+	let refreshInspects = false;
+	let refreshOutlineTree = false;
+	// console.log(line);
+	let regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: (.+):(\\d+) (.+ =)? (.+)$", "g");
+	let match = regexp.exec(line);
+	if (match != null) {
+		let key = "";
+		let msg = "";
+		const file = match[2];
+		const line = Number.parseInt(match[3]);
+		if (match.length == 6) {
+			key = match[4];
+			msg = match[5];
+			const regexp = new RegExp("^\\-?\\d+$", "g");
+			if (regexp.exec(msg) != null) {
+				const val = Number.parseInt(msg);
+				if (val & 0x80000000) {
+					msg = "0x"+decimalHexTwosComplement(val);
+				}
+			}
+			key = key.substring(0, key.length - 2);
+			DB.addLineInspect(file, line, key, msg);
+			msg = key + ": " + msg;
+		}
+		else {
+			msg = match[4];
+			DB.addLineInspect(file, line, msg);
+		}
+		outline.addInspectInformation(inspects, file, line, msg);
+		refreshInspects = true;
+		return [refreshInspects, refreshOutlineTree];
+	}
+	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function: (.+):(.+):(\\d+):(\\d+)$", "g");
+	match = regexp.exec(line);
+	if (match != null) {
+		const time = Number.parseInt(match[1])/1000000000.0;
+		const file = match[2];
+		const funName = match[3];
+		const line = Number.parseInt(match[4]);
+		const lineEnd = Number.parseInt(match[5]);
+		const func = inspects.getOrCreateFunc(file, funName, line, lineEnd);
+		func.times.push(new outline.LensInspectionAtTime(func, time, time.toFixed(6)));
+		if (func.showInspectFor.time == 0)
+			func.showInspectFor = func.times[0];
+		else
+			func.times[func.times.length - 1].timeDiff = func.times[func.times.length - 2].time - time;
+		DB.startTrial(file, line, lineEnd, funName, time);
+		return [refreshInspects, refreshOutlineTree];
+	}
+	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function Pointer: (.+):(\\d+):(.+):(.+)$", "g");
+	match = regexp.exec(line);
+	if (match != null) {
+		const file = match[2];
+		const line = Number.parseInt(match[3]);
+		const varName = match[4];
+		const val = match[5];
+		const msg = varName + ": " + val;
+		outline.addInspectInformation(inspects, file, line, msg);
+		DB.addLineInspect(file, line, varName, val);
+		refreshInspects = true;
+		return [refreshInspects, refreshOutlineTree];
+	}
+	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function return value: (.+):(\\d+):(.+) (.+) = (.+)$", "g");
+	match = regexp.exec(line);
+	if (match != null) {
+		let time = Number.parseInt(match[1])/1000000000.0;
+		const file = match[2];
+		const line = Number.parseInt(match[3]);
+		const funName = match[4];
+		const msg = "return "+match[5] + ": " + match[6];
+		outline.addInspectInformation(inspects, file, line, msg);
+		const func = inspects.getFunction(file, funName);
+		const currFunTime = func!.currentTime();
+		currFunTime.returnAtLine = line;
+		currFunTime.returnTime = time;
+		const t1 = currFunTime.time;
+		time -= t1;
+		let textTime = time.toFixed(3)+"s";
+		if (time < 0.000001)
+			textTime = (time * 1000000).toFixed(3)+"µs";
+		else if (time < 0.001)
+			textTime = (time * 1000000).toFixed(0)+"µs";
+		else if (time < 0.0)
+			textTime = (time * 1000).toFixed(0)+"ms";
+
+		outline.addInspectInformation(inspects, file, func!.range[0], "execute time: "+textTime);
+		DB.functionReturn(file, funName, time, line, match[5], match[6]);
+		refreshInspects = true;
+		return [refreshInspects, refreshOutlineTree];
+	}
+	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function (return|end): (.+):(\\d+):(.+)$", "g");
+	match = regexp.exec(line);
+	if (match != null) {
+		let time = Number.parseInt(match[1])/1000000000.0;
+		const file = match[3];
+		const funName = match[5];
+		const func = inspects.getFunction(file, funName);
+		const currFunTime = func!.currentTime();
+		let line;
+		if (match[2] == "return") {
+			line = Number.parseInt(match[4]);
+			outline.addInspectInformation(inspects, file, line, "return here");
+			currFunTime.returnAtLine = line;
+		}
+		currFunTime.returnTime = time;
+		const t1 = currFunTime.time;
+		time -= t1;
+		let textTime = time.toFixed(3)+"s";
+		if (time < 0.000001)
+			textTime = (time * 1000000).toFixed(3)+"µs";
+		else if (time < 0.001)
+			textTime = (time * 1000000).toFixed(0)+"µs";
+		else if (time < 0.0)
+			textTime = (time * 1000).toFixed(0)+"ms";
+
+		outline.addInspectInformation(inspects, file, func!.range[0], "execute time: "+textTime);
+		DB.functionReturn(file, funName, time, line);
+		refreshInspects = true;
+		return [refreshInspects, refreshOutlineTree];
+	}
+	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function stacktrace:(.+):(\\w+) (.+)$", "g");
+	match = regexp.exec(line);
+	if (match != null) {
+		const file = match[2];
+		const funName = match[3];
+		const func = inspects.getFunction(file, funName);
+		const text = match[4];
+		const currFunTime = func!.currentTime();
+		currFunTime!.stacktraceSum = CRC32.str(text);
+		text.substring(0, text.length - 2).split(',').forEach(line => {
+			line = line.split(" ")[0];
+			if (currFunTime!.stacktrace.length != 0 || line.split("+")[0] != funName)
+				currFunTime!.stacktrace.push(line);
+		});
+		DB.addStacktrace(file, funName, text, currFunTime!.stacktraceSum);
+		refreshOutlineTree = true;
+		return [refreshInspects, refreshOutlineTree];
+	}
+	console.log(line);
+	return [refreshInspects, refreshOutlineTree];
+}
+
 async function runListenenServer(iter: number) {
 	const cproc = await require('child_process');
 	const spawn = cproc.spawn;
 
-	const args = ["-i", DEKUConfig.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "root@"+DEKUConfig.address, "-p", DEKUConfig.port, "dmesg", "-w"];
+	const args = ["-i", DEKUConfig.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-tt", "root@"+DEKUConfig.address, "-p", DEKUConfig.port, "deku/dut_inspectd"];
 	const child = spawn("ssh", args);
 
-	child.stdout.on('data', function (data: string) {
+	const buffer = Buffer.alloc(1024);
+	let bufferIndex = 0;
+	child.stdout.on('data', (data: Buffer) => {
 		let refreshInspects = false;
 		let refreshOutlineTree = false;
-		data.toString().split("\n").forEach((line) => {
-			// console.log(line);
-			let regexp = new RegExp("^\\[\\s*(\\d+\\.\\d+)\\] DEKU Inspect: (.+):(\\d+) (.+ =)? (.+)$", "g");
-			let match = regexp.exec(line);
-			if (match != null) {
-				let key = "";
-				let msg = "";
-				const file = match[2];
-				const line = Number.parseInt(match[3]);
-				if (match.length == 6) {
-					key = match[4];
-					msg = match[5];
-					const regexp = new RegExp("^\\-\\d+$", "g");
-					if (regexp.exec(msg) != null) {
-						const val = Number.parseInt(msg);
-						if (val < 100000) {
-							msg = "0x"+decimalHexTwosComplement(val);
-						}
-					}
-					key = key.substring(0, key.length - 2);
-					msg = key + ": " + msg;
-					DB.addLineInspect(file, "", line, key, msg);
-				}
-				else {
-					msg = match[4];
-					DB.addLineInspect(file, "", line, msg);
-				}
-				outline.addInspectInformation(inspects, file, line, msg);
-				refreshInspects = true;
+		for (let i = 0; i < data.length; i++) {
+			if (data[i] == 10) {
+				[refreshInspects, refreshOutlineTree] = parseLine(buffer.slice(0, bufferIndex).toString().trim());
+				bufferIndex = 0;
+				continue;
 			}
-			regexp = new RegExp("^\\[\\s*(\\d+\\.\\d+)\\] DEKU Inspect: Function: (.+):(.+):(\\d+):(\\d+)$", "g");
-			match = regexp.exec(line);
-			if (match != null) {
-				const time = parseFloat(match[1]);
-				const file = match[2];
-				const funName = match[3];
-				const line = Number.parseInt(match[4]);
-				const lineEnd = Number.parseInt(match[5]);
-				const func = inspects.getOrCreateFunc(file, funName, line, lineEnd);
-				func.times.push(new outline.LensInspectionAtTime(func, time, match[1]));
-				if (func.showInspectFor.time == 0)
-					func.showInspectFor = func.times[0];
-				DB.startTrial(file, line, lineEnd, funName, time);
-			}
-			regexp = new RegExp("^\\[\\s*(\\d+\\.\\d+)\\] DEKU Inspect: Function Pointer: (.+):(\\d+):(.+):(.+)$", "g");
-			match = regexp.exec(line);
-			if (match != null) {
-				const file = match[2];
-				const line = Number.parseInt(match[3]);
-				const varName = match[4];
-				const val = match[5].split("+")[0];
-				const msg = varName + ": " + val;
-				outline.addInspectInformation(inspects, file, line, msg);
-				DB.addLineInspect(file, "", line, varName, val);
-				refreshInspects = true;
-			}
-			regexp = new RegExp("^\\[\\s*(\\d+\\.\\d+)\\] DEKU Inspect: Function return value: (.+):(\\d+):(.+) (.+) = (.+)$", "g");
-			match = regexp.exec(line);
-			if (match != null) {
-				let time = parseFloat(match[1]);
-				const file = match[2];
-				const line = Number.parseInt(match[3]);
-				const funName = match[4];
-				const msg = "return here: "+match[5] + ": " + match[6];
-				outline.addInspectInformation(inspects, file, line, msg);
-				const func = inspects.getFunction(file, funName);
-				const currFunTime = func!.currentTime();
-				currFunTime.returnAtLine = line;
-				currFunTime.returnTime = time;
-				const t1 = currFunTime.time;
-				time -= t1;
-				let textTime = time.toFixed(3)+"s";
-				if (time < 0.000001)
-					textTime = (time * 1000000).toFixed(3)+"µs";
-				else if (time < 0.001)
-					textTime = (time * 1000000).toFixed(0)+"µs";
-				else if (time < 0.0)
-					textTime = (time * 1000).toFixed(0)+"ms";
-
-				outline.addInspectInformation(inspects, file, func!.range[0], "execute time: "+textTime);
-				DB.functionReturn(line, funName, time, match[5], match[6]);
-				refreshInspects = true;
-			}
-			regexp = new RegExp("^\\[\\s*(\\d+\\.\\d+)\\] DEKU Inspect: Function (return|finish): (.+):(\\d+):(.+)$", "g");
-			match = regexp.exec(line);
-			if (match != null) {
-				let time = parseFloat(match[1]);
-				const file = match[3];
-				const funName = match[5];
-				const func = inspects.getFunction(file, funName);
-				const currFunTime = func!.currentTime();
-				let line;
-				if (match[2] == "return") {
-					line = Number.parseInt(match[4]);
-					outline.addInspectInformation(inspects, file, line, "return here");
-					currFunTime.returnAtLine = line;
-				}
-				currFunTime.returnTime = time;
-				const t1 = currFunTime.time;
-				time -= t1;
-				let textTime = time.toFixed(3)+"s";
-				if (time < 0.000001)
-					textTime = (time * 1000000).toFixed(3)+"µs";
-				else if (time < 0.001)
-					textTime = (time * 1000000).toFixed(0)+"µs";
-				else if (time < 0.0)
-					textTime = (time * 1000).toFixed(0)+"ms";
-
-				outline.addInspectInformation(inspects, file, func!.range[0], "execute time: "+textTime);
-				DB.functionReturn(time, funName, line);
-				refreshInspects = true;
-			}
-			regexp = new RegExp("^\\[\\s*(\\d+\\.\\d+)\\] DEKU Inspect: Function stacktrace:(.+):(\\w+) (.+)$", "g");
-			match = regexp.exec(line);
-			if (match != null) {
-				const file = match[2];
-				const funName = match[3];
-				const func = inspects.getFunction(file, funName);
-				const text = match[4];
-				const currFunTime = func!.currentTime();
-				currFunTime!.stacktraceSum = CRC32.str(text);
-				text.split(',').forEach(line => {
-					if (line.length > 0)
-						currFunTime!.stacktrace.push(line.split(" ")[0]);
-				});
-				DB.addStacktrace(file, funName, text);
-				refreshOutlineTree = true;
-			}
-		});
+			buffer[bufferIndex++] = data[i];
+		}
 		if (refreshInspects) {
 			refreshOutline();
 			showInspectsForCurrentEditor();
@@ -413,13 +508,14 @@ async function runListenenServer(iter: number) {
 		if (data.includes("Warning: Permanently added ")) {
 			vscode.window.showInformationMessage("Connected to Chromebook succesfully");
 			iter = 0;
+			return;
 		}
 		console.log('stderr: ' + data);
 	});
 
 	child.on('close', function (code: string) {
 		if (iter == 0) {
-			vscode.window.showErrorMessage("SSH Disconnected.");
+			vscode.window.showErrorMessage("Disconnected from Chromebook");
 			console.log('exit code: ' + code);
 		}
 		// setTimeout(runListenenServer, 1000 * iter <= 3 ? 1 : 10, iter + 1);
@@ -454,11 +550,11 @@ export class LinuxKernelInspector implements vscode.CodeActionProvider {
 		let action: vscode.CodeAction;
 		const path = vscode.workspace.asRelativePath(document.uri);
 		if (inspectFiles.isInspected(path, funName)) {
-			action = new vscode.CodeAction(`Remove inspection from the ${funName} function`, vscode.CodeActionKind.Empty);
+			action = new vscode.CodeAction(`Remove inspection from the function`, vscode.CodeActionKind.Empty);
 			action.command = { command: 'kernelinspect.remove_inspect_function', title: 'Remove-LinuxKernelInspect-Title', tooltip: 'Remove-LinuxKernelInspect-Tooltip.', arguments: [path, funName] };
 		} else {
 			const line = document.lineAt(range.start).text;
-			action = new vscode.CodeAction(`Inspect the ${funName} function`, vscode.CodeActionKind.Empty);
+			action = new vscode.CodeAction(`Inspect the function`, vscode.CodeActionKind.Empty);
 			action.command = { command: 'kernelinspect.inspect_function', title: 'LinuxKernelInspect-Title', tooltip: 'LinuxKernelInspect-Tooltip.', arguments: [path, funName, line] };
 		}
 		return action;

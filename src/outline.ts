@@ -13,6 +13,7 @@ export class LensInspectionAtTime {
 	stacktraceSum = 0;
 	returnAtLine = 0;
 	returnTime!: number;
+	timeDiff = 0;
 
 	public constructor(fun: LensInspectionFunction, time: number, textTime: string) {
 		this.fun = fun;
@@ -48,7 +49,7 @@ class ReturnItem {
 }
 
 class StacktraceItem {
-	public constructor(public time: LensInspectionAtTime) {}
+	public constructor(public time: LensInspectionAtTime, public index: number) {}
 }
 
 export class LensInspectionRoot {
@@ -114,6 +115,23 @@ export class LensInspectionRoot {
 
 		return inspectFunc;
 	}
+
+	public findTrial(filePath: string, time: number): LensInspectionAtTime | undefined {
+		let result;
+		this.files.forEach(file => {
+			if (file.file == filePath) {
+				file.functions.forEach(func => {
+					for (let i = 0; i < func.times.length; i++) {
+						if (func.times[i].time == time) {
+							result = func.times[i];
+							return;
+						}
+					}
+				});
+			}
+		});
+		return result;
+	}
 }
 
 export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
@@ -147,6 +165,8 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 					tooltip: 'getTreeItem Tooltip'
 				};
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+			titem.iconPath = new vscode.ThemeIcon('json');
+			titem.resourceUri = vscode.Uri.parse(item.name+item.currentTime+"_AAA?"+item.times.length);
 			return titem;
 		} else if (item instanceof LensInspectionAtTime) {
 			const titem = new vscode.TreeItem(
@@ -159,7 +179,10 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 				tooltip: 'Open FTP Resource1'
 			};
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
-			titem.description = ((item.time - item.returnTime)*100).toFixed(3)+"ms";
+			titem.iconPath = new vscode.ThemeIcon('history');
+			titem.description = ((item.returnTime - item.time)*1000).toFixed(3)+"ms";
+			titem.resourceUri = vscode.Uri.parse(item.fun.name+item.stacktraceSum+item.fun.name+"_AAA?"+item.timeDiff+"ms");
+
 			return titem;
 		}
 		else
@@ -207,7 +230,8 @@ export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
 			arguments: [item.file, item.fun],
 			title: 'Open inspected function',
 		};
-		titem.resourceUri = vscode.Uri.parse(item.file+"_AAA");
+		titem.iconPath = new vscode.ThemeIcon('circle-outline');
+		// titem.resourceUri = vscode.Uri.parse(item.file+"_AAA?"+item.times.length);
 		return titem;
 	}
 
@@ -245,11 +269,13 @@ export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
 					: vscode.TreeItemCollapsibleState.None
 			);
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+			titem.iconPath = new vscode.ThemeIcon('code');
 			return titem;
 		} else if (item instanceof ReturnItem) {
 			const titem = new vscode.TreeItem(
 				"return at line: "+item.time.returnAtLine, vscode.TreeItemCollapsibleState.Collapsed
 			);
+			titem.iconPath = new vscode.ThemeIcon('indent');
 			return titem;
 		} else if (item instanceof LensInspectionAtTime) {
 			const titem = new vscode.TreeItem(
@@ -262,6 +288,7 @@ export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
 				tooltip: 'Open FTP Resource1'
 			};
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
+			titem.iconPath = new vscode.ThemeIcon('history');
 			return titem;
 		}
 		else
@@ -331,11 +358,21 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 					: vscode.TreeItemCollapsibleState.None
 			);
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+			titem.iconPath = new vscode.ThemeIcon('json');
 			return titem;
 		} else if (item instanceof StacktraceItem) {
 			const titem = new vscode.TreeItem(
-				"stacktrace: #"+item.time.stacktraceSum, vscode.TreeItemCollapsibleState.Collapsed
+				"#"+item.index, vscode.TreeItemCollapsibleState.Collapsed
 			);
+			titem.tooltip = "";
+			titem.description = "";
+			item.time.stacktrace.forEach(line => {
+				titem.tooltip += line + "\n";
+			});
+			for (let i = 0; i < 4; i++)
+				titem.description += item.time.stacktrace[i].split("+")[0]+", ";
+			titem.description += "...";
+			titem.iconPath = new vscode.ThemeIcon('layers');
 			return titem;
 		} else if (item instanceof LensInspectionAtTime) {
 			const titem = new vscode.TreeItem(
@@ -348,6 +385,7 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 				tooltip: 'Open FTP Resource1'
 			};
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
+			titem.iconPath = new vscode.ThemeIcon('history');
 			return titem;
 		}
 		else
@@ -362,7 +400,7 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 			element.times.forEach(time => {
 				if (!stackSum.includes(time.stacktraceSum)) {
 					stackSum.push(time.stacktraceSum);
-					items.push(new StacktraceItem(time));
+					items.push(new StacktraceItem(time, items.length+1));
 				}
 			});
 			if (stackSum.length > 1) {

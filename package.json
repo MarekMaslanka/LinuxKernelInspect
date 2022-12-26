@@ -17,7 +17,7 @@
 	"main": "./out/extension.js",
 	"contributes": {
 		"capabilities": {
-		  "hoverProvider": "true"
+			"hoverProvider": "true"
 		},
 		"commands": [
 			{
@@ -30,7 +30,7 @@
 				{
 					"id": "inspect-explorer",
 					"title": "Inspects Explorer",
-					"icon": "resources/icon.png"
+					"icon": "$(symbol-keyword)"
 				}
 			]
 		},
@@ -45,15 +45,26 @@
 					"name": "Function returns"
 				},
 				{
+					"id": "functionStacktraceTreeProvider",
+					"name": "Function stacktraces"
+				},
+				{
 					"id": "documentOutline2",
 					"name": "Inspects"
+				},
+				{
+					"type": "webview",
+					"id": "kernelInspect-sqlSidebar",
+					"name": "SQL",
+					"icon": "database",
+					"contextualTitle": "SQL"
 				}
 			]
 		},
 		"viewsWelcome": [
 			{
-			  "view": "inspect-explorer",
-			  "contents": "Welcome"
+				"view": "inspect-explorer",
+				"contents": "Welcome"
 			}
 		]
 	},
@@ -64,15 +75,15 @@
 		"watch": "tsc -w -p ./"
 	},
 	"devDependencies": {
-		"@types/node": "^16.11.7",
+		"@types/node": "16.18.1",
 		"@types/vscode": "1.52.0",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
 		"@vscode/codicons": "0.0.20",
 		"axios": "^0.26.1",
+		"crc-32": "^1.2.2",
 		"eslint": "^8.26.0",
 		"typescript": "^4.8.4",
-		"crc-32": "^1.2.2",
 		"sqlite3": "^5.1.2"
 	}
 }

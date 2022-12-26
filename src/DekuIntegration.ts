@@ -23,6 +23,8 @@ export class InspectFiles {
 	public inspections: InspectFunction[] = [];
 
 	public read() {
+		if (!fs.existsSync(this.file))
+			return;
 		const buffer = fs.readFileSync(this.file, "utf-8");
 		buffer.split("\n").forEach((line) => {
 			console.log(line);
@@ -67,28 +69,44 @@ export class InspectFiles {
 
 export async function execDekuDeploy() {
 	updateStatusBarItem(true);
-	try {
-		axios
-		.get("http://localhost:8090")
-		.then(function (response) {
-			updateStatusBarItem(false);
-			const text = response.data;
-			console.log("DEKU reponse:\n" + text);
-			const lines = text.split('\n');
-			let result: string = lines[lines.length - 1];
-			if (result == "" && lines.length > 1)
-				result = lines[lines.length - 2];
-			if (result.indexOf("[0;") == 1)
-				result = result.substring(7, result.length - 4);
-			if (result.includes("successfully") || result.includes("done"))
-				vscode.window.showInformationMessage(result);
-			else if (result.includes("No modules need to upload"))
-				vscode.window.showInformationMessage("No changes detected since last run");
-			else
-				vscode.window.showErrorMessage("An error has occurred when performed DEKU Apply. See the logs for details.");
+
+	vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "Applying inspection...",
+		cancellable: false
+	}, (progress, token) => {
+		// setTimeout(() => {
+		// 	progress.report({ increment: 10, message: "long running! - still going..." });
+		// }, 1000);
+
+		const p = new Promise<void>(resolve => {
+			try {
+				axios
+				.get("http://localhost:8090")
+				.then(function (response) {
+					resolve();
+					updateStatusBarItem(false);
+					const text = response.data;
+					console.log("DEKU reponse:\n" + text);
+					const lines = text.split('\n');
+					let result: string = lines[lines.length - 1];
+					if (result == "" && lines.length > 1)
+						result = lines[lines.length - 2];
+					if (result.indexOf("[0;") == 1)
+						result = result.substring(7, result.length - 4);
+					if (result.includes("successfully") || result.includes("done"))
+						vscode.window.showInformationMessage(result);
+					else if (result.includes("No modules need to upload"))
+						vscode.window.showInformationMessage("No changes detected since last run");
+					else
+						vscode.window.showErrorMessage("An error has occurred when performed DEKU Apply. See the logs for details.");
+				});
+			} catch (error) {
+				resolve();
+				updateStatusBarItem(false);
+				console.error(error);
+			}
 		});
-	} catch (error) {
-		updateStatusBarItem(false);
-		console.error(error);
-	}
+		return p;
+	});
 }
