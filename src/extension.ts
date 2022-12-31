@@ -366,7 +366,7 @@ function parseLine(line: string) : [boolean, boolean]{
 		refreshInspects = true;
 		return [refreshInspects, refreshOutlineTree];
 	}
-	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function: (.+):(.+):(\\d+):(\\d+)$", "g");
+	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function: (.+):(.+):(\\d+):(\\d+):(.+)$", "g");
 	match = regexp.exec(line);
 	if (match != null) {
 		const time = Number.parseInt(match[1])/1000000000.0;
@@ -374,13 +374,15 @@ function parseLine(line: string) : [boolean, boolean]{
 		const funName = match[3];
 		const line = Number.parseInt(match[4]);
 		const lineEnd = Number.parseInt(match[5]);
+		const calledFrom = match[6];
 		const func = inspects.getOrCreateFunc(file, funName, line, lineEnd);
 		func.times.push(new outline.LensInspectionAtTime(func, time, time.toFixed(6)));
 		if (func.showInspectFor.time == 0)
 			func.showInspectFor = func.times[0];
 		else
 			func.times[func.times.length - 1].timeDiff = func.times[func.times.length - 2].time - time;
-		DB.startTrial(file, line, lineEnd, funName, time);
+		func.times[func.times.length - 1].calledFrom = calledFrom;
+		DB.startTrial(file, line, lineEnd, funName, time, calledFrom);
 		return [refreshInspects, refreshOutlineTree];
 	}
 	regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function Pointer: (.+):(\\d+):(.+):(.+)$", "g");
@@ -432,7 +434,7 @@ function parseLine(line: string) : [boolean, boolean]{
 		const funName = match[5];
 		const func = inspects.getFunction(file, funName);
 		const currFunTime = func!.currentTime();
-		let line;
+		let line = undefined;
 		if (match[2] == "return") {
 			line = Number.parseInt(match[4]);
 			outline.addInspectInformation(inspects, file, line, "return here");
@@ -483,7 +485,7 @@ async function runListenenServer(iter: number) {
 	const args = ["-i", DEKUConfig.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-tt", "root@"+DEKUConfig.address, "-p", DEKUConfig.port, "deku/dut_inspectd"];
 	const child = spawn("ssh", args);
 
-	const buffer = Buffer.alloc(1024);
+	const buffer = Buffer.alloc(1024*100);
 	let bufferIndex = 0;
 	child.stdout.on('data', (data: Buffer) => {
 		let refreshInspects = false;

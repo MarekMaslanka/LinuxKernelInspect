@@ -14,6 +14,7 @@ export class LensInspectionAtTime {
 	returnAtLine = 0;
 	returnTime!: number;
 	timeDiff = 0;
+	calledFrom = "";
 
 	public constructor(fun: LensInspectionFunction, time: number, textTime: string) {
 		this.fun = fun;

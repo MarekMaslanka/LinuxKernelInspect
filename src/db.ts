@@ -105,7 +105,7 @@ export class Database
 		});
 	}
 
-	public startTrial(file: string, line: number, endLine: number, funName: string, time: number): void
+	public startTrial(file: string, line: number, endLine: number, funName: string, time: number, calledFrom: string): void
 	{
 		this.db.serialize(() => {
 			this.db.run("INSERT INTO file (path, source, commit_hash) VALUES ($path, $source, $commit)", {
