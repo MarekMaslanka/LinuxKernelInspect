@@ -309,30 +309,6 @@ function showInspectsForCurrentEditor() {
 	showInspectInformation(lines);
 }
 
-function decimalHexTwosComplement(decimal: number) {
-	const size = 8;
-
-	if (decimal >= 0) {
-		let hexadecimal = decimal.toString(16);
-
-		while ((hexadecimal.length % size) != 0)
-			hexadecimal = "" + 0 + hexadecimal;
-
-		return hexadecimal;
-	} else {
-		let hexadecimal = Math.abs(decimal).toString(16);
-		while ((hexadecimal.length % size) != 0)
-			hexadecimal = "" + 0 + hexadecimal;
-
-		let output = '';
-		for (let i = 0; i < hexadecimal.length; i++)
-			output += (0x0F - parseInt(hexadecimal[i], 16)).toString(16);
-
-		output = (0x01 + parseInt(output, 16)).toString(16);
-		return output;
-	}
-}
-
 function parseLine(line: string) : [boolean, boolean]{
 	let refreshInspects = false;
 	let refreshOutlineTree = false;
@@ -347,15 +323,10 @@ function parseLine(line: string) : [boolean, boolean]{
 		if (match.length == 6) {
 			key = match[4];
 			msg = match[5];
-			const regexp = new RegExp("^\\-?\\d+$", "g");
-			if (regexp.exec(msg) != null) {
-				const val = Number.parseInt(msg);
-				if (val & 0x80000000) {
-					msg = "0x"+decimalHexTwosComplement(val);
-				}
-			}
 			key = key.substring(0, key.length - 2);
 			DB.addLineInspect(file, line, key, msg);
+			if (msg == "0x0000000000000000")
+				msg = "NULL";
 			msg = key + ": " + msg;
 		}
 		else {
@@ -405,7 +376,9 @@ function parseLine(line: string) : [boolean, boolean]{
 		const file = match[2];
 		const line = Number.parseInt(match[3]);
 		const funName = match[4];
-		const msg = "return "+match[5] + ": " + match[6];
+		let msg = "return " + match[5] + ": " + match[6];
+		if (match[5] == "true" || match[5] == "false")
+			msg = "return " + match[5];
 		outline.addInspectInformation(inspects, file, line, msg);
 		const func = inspects.getFunction(file, funName);
 		const currFunTime = func!.currentTime();
@@ -482,7 +455,7 @@ async function runListenenServer(iter: number) {
 	const cproc = await require('child_process');
 	const spawn = cproc.spawn;
 
-	const args = ["-i", DEKUConfig.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-tt", "root@"+DEKUConfig.address, "-p", DEKUConfig.port, "deku/dut_inspectd"];
+	const args = ["-i", DEKUConfig.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-tt", "root@"+DEKUConfig.address, "-p", DEKUConfig.port, "deku/kinspectd"];
 	const child = spawn("ssh", args);
 
 	const buffer = Buffer.alloc(1024*100);
