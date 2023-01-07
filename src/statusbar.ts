@@ -1,26 +1,23 @@
 import * as vscode from "vscode";
-import { execDekuDeploy } from "./DekuIntegration";
+import { Deku } from "./DekuIntegration";
 
-let myStatusBarItem: vscode.StatusBarItem;
+let deployStatusBarItem: vscode.StatusBarItem;
 
-export function setupStatusbar(subscriptions: vscode.Disposable[], editor: vscode.TextEditor | undefined) {
-	// register a command that is invoked when the status bar
-	// item is selected
+export function setupStatusbar(deku: Deku, subscriptions: vscode.Disposable[], editor: vscode.TextEditor | undefined) {
 	const myCommandId = 'sample.showSelectionCount';
 	subscriptions.push(vscode.commands.registerCommand(myCommandId, () => {
-		execDekuDeploy();
+		deku.execDekuDeploy();
 	}));
 
-	// create a new status bar item that we can now manage
-	myStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-	myStatusBarItem.command = myCommandId;
-	subscriptions.push(myStatusBarItem);
+	deployStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	deployStatusBarItem.command = myCommandId;
+	subscriptions.push(deployStatusBarItem);
 
 	updateStatusBarItem(false);
 }
 
 export function updateStatusBarItem(inprogress: boolean): void {
-	myStatusBarItem.text = inprogress ? `$(sync~spin) DEKU Applying` : `$(sync) DEKU Apply`;
-	myStatusBarItem.show();
+	deployStatusBarItem.text = inprogress ? `$(sync~spin) DEKU Applying` : `$(sync) DEKU Apply`;
+	deployStatusBarItem.show();
 }
 

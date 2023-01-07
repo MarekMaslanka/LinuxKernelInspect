@@ -66,7 +66,19 @@
 				"view": "inspect-explorer",
 				"contents": "Welcome"
 			}
-		]
+		],
+		"configuration": {
+			"type": "object",
+			"title": "DEKU Inspect",
+			"properties": {
+			    "dekuinspect.path": {
+				"type": "string",
+				"default": "",
+				"description": "Path to DEKU",
+				"scope": "machine"
+			    }
+			}
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
