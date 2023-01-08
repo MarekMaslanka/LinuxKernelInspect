@@ -2,17 +2,10 @@
 /* eslint-disable no-undef */
 //@ts-check
 
-// This script will be run within the webview itself
-// It cannot access the main VS Code APIs directly.
 (function () {
     // @ts-ignore
     const vscode = acquireVsCodeApi();
-
-    // const oldState = vscode.getState() || { colors: [] };
-    // updateColorList(colors);
-
     let rows = [];
-
 
     document.querySelector('.exec-sql-query')?.addEventListener('click', () => {
         const inputEl = document.querySelector('input');
@@ -71,7 +64,7 @@
                 if (key === "time") {
                     const aElem = document.createElement('a');
                     aElem.setAttribute('href', '#');
-                    aElem.textContent = val;
+                    aElem.textContent = (val / 1000000000.0).toString();
                     tdElem.addEventListener('click', () => {
                         onSelectTrial(val);
                     });
@@ -86,12 +79,6 @@
         tabDiv?.appendChild(tabElem);
     }
 
-    // function updateColorList(colors) {
-    //     // Update the saved state
-    //     vscode.setState({ colors: colors });
-    // }
-
-
     function onSelectTrial(trial) {
         vscode.postMessage({ type: 'trialSelected', value: trial });
     }
@@ -101,5 +88,3 @@
         updateSQLTable(rows);
     }
 }());
-
-

@@ -25,6 +25,7 @@ export class Database
 			this.db.run('DROP TABLE trial;', this.insertCb);
 			this.db.run('DROP TABLE stacktrace;', this.insertCb);
 			this.db.run('DROP TABLE inspect;', this.insertCb);
+			this.db.run('DROP VIEW variables;', this.insertCb);
 
 			this.db.run('CREATE TABLE "file" (\
 				"id"	INTEGER NOT NULL UNIQUE,\
@@ -72,7 +73,7 @@ export class Database
 				PRIMARY KEY("id" AUTOINCREMENT)\
 				)', this.insertCb);
 			this.db.run('CREATE VIEW variables AS\
-				SELECT time/1000000.0 AS time, var_name, var_value, line, path FROM inspect\
+				SELECT time, var_name, var_value, line, path FROM inspect\
 				INNER JOIN trial ON trial.id = inspect.trial_id\
 				INNER JOIN function ON function.id = trial.function_id\
 				INNER JOIN file ON file.id = function.file_id',
@@ -120,7 +121,7 @@ export class Database
 				$path: file
 			}, this.insertCb);
 			this.db.run("INSERT INTO trial (time, return_time, return_line, function_id) VALUES ($time, 0, 0, (SELECT id FROM function WHERE name = $funName AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1))", {
-				$time: (time * 1000000).toFixed(0),
+				$time: time,
 				$funName: funName,
 				$path: file
 			}, this.insertCb);
@@ -168,7 +169,7 @@ export class Database
 			line = 0;
 		this.db.serialize(() => {
 			this.db.run("UPDATE trial SET return_time = $time, return_line = $line WHERE function_id = (SELECT id FROM function WHERE name = $funName AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1)", {
-				$time: (time * 1000000).toFixed(0),
+				$time: time,
 				$line: line,
 				$funName: funName,
 				$path: file

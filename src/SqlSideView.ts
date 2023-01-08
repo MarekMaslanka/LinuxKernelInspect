@@ -38,7 +38,6 @@ export default class SqlSideViewProvider implements vscode.WebviewViewProvider
 				case 'trialSelected':
 				{
 					this.showTrialCb(data.value);
-					// vscode.window.activeTextEditor?.insertSnippet(new vscode.SnippetString(`#${data.value}`));
 					break;
 				}
 				case 'execSqlQuery':
@@ -55,9 +54,8 @@ export default class SqlSideViewProvider implements vscode.WebviewViewProvider
 
 	public addRow(row: any)
 	{
-		// const row = { id: 32, time: 21, path: "sadffsd" };
 		if (this._view) {
-			this._view.show?.(true); // `show` is not implemented in 1.49 but is for 1.50 insiders
+			this._view.show(true);
 			this._view.webview.postMessage({ type: 'addRow', data: row });
 		}
 	}
@@ -72,7 +70,7 @@ export default class SqlSideViewProvider implements vscode.WebviewViewProvider
 	public activatedFile(path: string)
 	{
 		if (this._view) {
-			this._view.webview.postMessage({ type: 'showQuery', data: `SELECT * FROM variables WHERE path = "${path}"` });
+			this._view.webview.postMessage({ type: 'showQuery', data: `SELECT * FROM variables WHERE path = "${path}" LIMIT 100` });
 		}
 	}
 

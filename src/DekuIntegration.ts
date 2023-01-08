@@ -207,14 +207,15 @@ export class Deku
 		regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function: (.+):(.+):(\\d+):(\\d+):(.+)$", "g");
 		match = regexp.exec(line);
 		if (match != null) {
-			const time = Number.parseInt(match[1])/1000000000.0;
+			const time = Number.parseInt(match[1]);
 			const file = match[2];
 			const funName = match[3];
 			const line = Number.parseInt(match[4]);
 			const lineEnd = Number.parseInt(match[5]);
 			const calledFrom = match[6];
 			const func = this.inspects.getOrCreateFunc(file, funName, line, lineEnd);
-			func.times.push(new outline.LensInspectionAtTime(func, time, time.toFixed(6)));
+			const timeStr = (time/1000000000.0).toFixed(6);
+			func.times.push(new outline.LensInspectionAtTime(func, time, timeStr));
 			if (func.showInspectFor.time == 0)
 				func.showInspectFor = func.times[0];
 			else
@@ -239,7 +240,7 @@ export class Deku
 		regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function return value: (.+):(\\d+):(.+) (.+) = (.+)$", "g");
 		match = regexp.exec(line);
 		if (match != null) {
-			let time = Number.parseInt(match[1])/1000000000.0;
+			let time = Number.parseInt(match[1]);
 			const file = match[2];
 			const line = Number.parseInt(match[3]);
 			const funName = match[4];
@@ -253,13 +254,11 @@ export class Deku
 			currFunTime.returnTime = time;
 			const t1 = currFunTime.time;
 			time -= t1;
-			let textTime = time.toFixed(3)+"s";
-			if (time < 0.000001)
-				textTime = (time * 1000000).toFixed(3)+"µs";
-			else if (time < 0.001)
-				textTime = (time * 1000000).toFixed(0)+"µs";
-			else if (time < 0.0)
-				textTime = (time * 1000).toFixed(0)+"ms";
+			let textTime = (time / 1000).toFixed(0) + "µs";
+			if (time > 1000000000)
+				textTime = (time / 1000000000).toFixed(3) + "s";
+			else if (time > 1000000)
+				textTime = (time / 1000000).toFixed(3) + "ms";
 
 			outline.addInspectInformation(this.inspects, file, func!.range[0], "execute time: "+textTime);
 			this.DB.functionReturn(file, funName, time, line, match[5], match[6]);
@@ -269,7 +268,7 @@ export class Deku
 		regexp = new RegExp("^\\[(\\d+)\\] DEKU Inspect: Function (return|end): (.+):(\\d+):(.+)$", "g");
 		match = regexp.exec(line);
 		if (match != null) {
-			let time = Number.parseInt(match[1])/1000000000.0;
+			let time = Number.parseInt(match[1]);
 			const file = match[3];
 			const funName = match[5];
 			const func = this.inspects.getFunction(file, funName);
@@ -283,13 +282,11 @@ export class Deku
 			currFunTime.returnTime = time;
 			const t1 = currFunTime.time;
 			time -= t1;
-			let textTime = time.toFixed(3)+"s";
-			if (time < 0.000001)
-				textTime = (time * 1000000).toFixed(3)+"µs";
-			else if (time < 0.001)
-				textTime = (time * 1000000).toFixed(0)+"µs";
-			else if (time < 0.0)
-				textTime = (time * 1000).toFixed(0)+"ms";
+			let textTime = (time / 1000).toFixed(0) + "µs";
+			if (time > 1000000000)
+				textTime = (time / 1000000000).toFixed(3) + "s";
+			else if (time > 1000000)
+				textTime = (time / 1000000).toFixed(3) + "ms";
 
 			outline.addInspectInformation(this.inspects, file, func!.range[0], "execute time: "+textTime);
 			this.DB.functionReturn(file, funName, time, line);
@@ -325,7 +322,7 @@ export class Deku
 
 		const args = ["-i", conf.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no",
 					"-o", "UserKnownHostsFile=/dev/null", "-tt", "root@"+conf.address,
-					"-p", conf.port, "deku/kinspectd"];
+					"-p", conf.port, "cat", "/sys/kernel/debug/deku/inspect"];
 		const child = spawn("ssh", args);
 
 		const buffer = Buffer.alloc(1024*100);

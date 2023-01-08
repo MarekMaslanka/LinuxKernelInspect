@@ -181,7 +181,7 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 			};
 			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
 			titem.iconPath = new vscode.ThemeIcon('history');
-			titem.description = ((item.returnTime - item.time)*1000).toFixed(3)+"ms";
+			titem.description = ((item.returnTime - item.time) / 1000000).toFixed(3)+"ms";
 			titem.resourceUri = vscode.Uri.parse(item.fun.name+item.stacktraceSum+item.fun.name+"_AAA?"+item.timeDiff+"ms");
 
 			return titem;

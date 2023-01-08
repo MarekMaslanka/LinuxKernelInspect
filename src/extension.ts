@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 import * as outline from "./outline";
-import { Deku, DEKUConfig, InspectFiles } from "./DekuIntegration";
+import { Deku, InspectFiles } from "./DekuIntegration";
 import { generateFunctionList } from "./parser";
 import { setupStatusbar } from "./statusbar";
 import { Database } from "./db";
@@ -72,8 +72,8 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}, null, context.subscriptions);
 
-	const sqlProvider = new SqlSideViewProvider(context.extensionUri, DB, trial => {
-		const time = inspects.findTrial(vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri), trial);
+	const sqlProvider = new SqlSideViewProvider(context.extensionUri, DB, rawTime => {
+		const time = inspects.findTrial(vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri), rawTime);
 		if (!time) {
 			vscode.window.showErrorMessage("Unknown error");
 			return;
