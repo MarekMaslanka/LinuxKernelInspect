@@ -7,22 +7,11 @@ import { setupStatusbar } from "./statusbar";
 import { Database } from "./db";
 import TreeDecorationProvider from "./TreeDecorationProvider";
 import SqlSideViewProvider from "./SqlSideView";
+import { decorateChanges } from "./outline";
 // import { CodelensProvider } from './CodelensProvider';
 
 const inspectFiles = new InspectFiles();
 let functionsMap = new Map<number, string>();
-
-const decorationType = vscode.window.createTextEditorDecorationType({
-	backgroundColor: "rgba(0, 150, 0, 0.2)",
-	// outline: "2px solid white",
-	// opacity: "0.3",
-	after: {
-		contentText: "Random text",
-		color: "gray",
-		fontStyle: "italic"
-	},
-	isWholeLine: true,
-});
 
 const window = vscode.window;
 const workspace = vscode.workspace;
@@ -51,14 +40,14 @@ export function activate(context: vscode.ExtensionContext) {
 		const openEditor = vscode.window.visibleTextEditors.filter(
 			editor => editor.document.uri === event.document.uri
 		)[0];
-		decorate(openEditor);
+		decorateChanges(openEditor);
 	});
 
 	window.onDidChangeActiveTextEditor(function (editor) {
 		activeEditor = editor;
 		if (editor) {
 			functionsMap.clear();
-			decorate(editor);
+			decorateChanges(editor);
 			refreshOutline();
 			showInspectsForCurrentEditor();
 			sqlProvider.activatedFile(vscode.workspace.asRelativePath(editor.document.uri));
@@ -68,7 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
 	workspace.onDidChangeTextDocument(function (event) {
 		if (activeEditor && event.document === activeEditor.document) {
 			functionsMap.clear();
-			decorate(activeEditor);
+			decorateChanges(activeEditor);
 		}
 	}, null, context.subscriptions);
 
@@ -260,19 +249,6 @@ function decorationX(line: number, msg: string) {
 			new vscode.Position(line - 1, 1024),
 		),
 	};
-}
-
-function decorate(editor: vscode.TextEditor) {
-	// const sourceCode = editor.document.getText();
-	// const regex = /(console\.log)/;
-
-	// const decorationsArray: vscode.DecorationOptions[] = [];
-	// {
-	//   const range = new vscode.Range(0, 0, 10, 0);
-	//   decorationsArray.push({ range });
-	// }
-
-	// editor.setDecorations(decorationType, decorationsArray);
 }
 
 function refreshOutline() {

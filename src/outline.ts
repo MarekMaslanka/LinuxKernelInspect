@@ -439,3 +439,64 @@ export function addInspectInformation(inspects: LensInspectionRoot, file: string
 		linesMap!.set(line, []);
 	linesMap!.get(line)?.push(value);
 }
+
+const decorationType = vscode.window.createTextEditorDecorationType({
+	backgroundColor: "#007acc33",
+	isWholeLine: true,
+});
+
+export function decorateChanges(editor: vscode.TextEditor)
+{
+	const { exec } = require("child_process");
+	const path = vscode.workspace.asRelativePath(editor.document.uri);
+	const folder = vscode.workspace.workspaceFolders![0];
+	const kernelSrc = folder.uri.path;
+	exec("git -C " + kernelSrc + " diff -U0 " + path, (error: any, stdout: any, stderr: any) => {
+		if (error) {
+			console.log(`error: ${error.message}`);
+			return [];
+		}
+		if (stderr) {
+			console.log(`stderr: ${stderr}`);
+			return [];
+		}
+		var re;
+		var regex;
+		var chunks: number[][] = [];
+		let chunk = [-1, -1];
+		var lineNo = -1;
+		stdout.split("\n").forEach((line: string) => {
+			regex = /\+\+\+\ (b\/)?(.+)/g;
+			if ((re = regex.exec(line)) !== null) {
+				return;
+			}
+			regex = /@@\ -[0-9]+(,[0-9]+)?\ \+([0-9]+)(,[0-9]+)?\ @@.*/g;
+			if ((re = regex.exec(line)) !== null) {
+				lineNo = Number.parseInt(re[2]);
+				chunk = [lineNo, -1];
+				chunks.push(chunk);
+				return;
+			}
+			if (lineNo != -1) {
+				regex = /^(\[[0-9;]*m)*([\ +-])/g;
+				if ((re = regex.exec(line)) !== null) {
+					if (re[2] === '+') {
+						chunk[1] = lineNo;
+						lineNo++;
+					}
+				} else {
+					lineNo = -1;
+				}
+			}
+		});
+
+		const decorationsArray: vscode.DecorationOptions[] = [];
+		chunks.forEach(chunk => {
+			if (chunk[1] != -1) {
+				const range = new vscode.Range(chunk[0] - 1, 0, chunk[1] - 1, 0);
+				decorationsArray.push({ range });
+			}
+		});
+		editor.setDecorations(decorationType, decorationsArray);
+	});
+}
