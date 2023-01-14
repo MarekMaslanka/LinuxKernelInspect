@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { EventEmitter, Event } from "vscode";
 import * as path from 'path';
 import { InspectFunction } from "./DekuIntegration";
-import { time } from "console";
+import { Ftrace, TracedFunction } from "./Ftrace";
 
 export class LensInspectionAtTime {
 	time!: number;
@@ -52,6 +52,10 @@ class ReturnItem {
 class StacktraceItem {
 	public constructor(public time: LensInspectionAtTime, public index: number) {}
 }
+
+// class HistogramItem {
+// 	public constructor(public name: string, public trace: TracedFunction) {}
+// }
 
 export class LensInspectionRoot {
 	files: LensInspectionFile[] = [];
@@ -232,6 +236,7 @@ export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
 			title: 'Open inspected function',
 		};
 		titem.iconPath = new vscode.ThemeIcon('circle-outline');
+		titem.contextValue = "functionInspect"
 		// titem.resourceUri = vscode.Uri.parse(item.file+"_AAA?"+item.times.length);
 		return titem;
 	}
@@ -427,6 +432,109 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 				}
 			});
 			childs = items;
+		}
+		return Promise.resolve(childs);
+	}
+}
+
+export class HistogramTreeProvider implements vscode.TreeDataProvider<any> {
+
+	public changeEvent = new EventEmitter<void>();
+	private path = "";
+	private funcsInFile: string[] = [];
+	private items: vscode.TreeItem[] = [];
+
+	constructor(private ftrace: Ftrace | undefined) {
+	}
+
+	public get onDidChangeTreeData(): Event<void> {
+		return this.changeEvent.event;
+	}
+	public updatePath(path: string, funcsInFile: string[]): any {
+		this.path = path;
+		this.funcsInFile = funcsInFile;
+		this.items = [];
+		this.refresh();
+	}
+
+	public refresh(): any {
+		this.changeEvent.fire();
+	}
+
+	private updateTreeItem(item: vscode.TreeItem, trace: TracedFunction) {
+		item.resourceUri = vscode.Uri.parse("deku.histogram?"+trace.funName+"#"+trace.count);
+		if (trace.count > 0)
+			item.description = `(called: ${trace.count})`;
+	}
+
+	getTreeItem(item: any): vscode.TreeItem {
+		if (typeof item == 'string') {
+			return new vscode.TreeItem(
+				item,
+				vscode.TreeItemCollapsibleState.None
+			);
+		}
+
+		if (item instanceof TracedFunction) {
+			let count = 0;
+			const trace = this.ftrace!.histogram.get(item.funName)!;
+			if (trace == undefined)
+				count = -1;
+			else
+				count = trace.count;
+			let titem = this.items.find(it => it.label == item.funName);
+			if (titem) {
+				this.updateTreeItem(titem, item);
+				return titem;
+			}
+
+			titem = new vscode.TreeItem(
+				item.funName,
+				vscode.TreeItemCollapsibleState.None
+			);
+			titem.command = {
+				command: 'deku.gotoFunction',
+				arguments: [this.path, item.funName],
+				title: 'getTreeItem Title',
+				tooltip: 'getTreeItem Tooltip'
+			};
+			titem.iconPath = new vscode.ThemeIcon('json');
+			let tooltip = "";
+			if (count == -1) {
+				tooltip = "Can't track this function. This function might be inlined.";
+			} else if (count == 0){
+				tooltip = "Function hasn't been called yet"
+			} else {
+				tooltip = "**Function called from:**\n";
+				item.parents.forEach((count, parentFun) => {
+					tooltip += `* ${parentFun} (${count} times)\n`;
+				});
+			}
+			titem.tooltip = new vscode.MarkdownString(tooltip, false);
+			this.items.push(titem);
+			this.updateTreeItem(titem, item);
+			return titem;
+		}
+		else
+			return new vscode.TreeItem("Unknown");
+	}
+
+	getChildren(_element?: any): vscode.ProviderResult<[]> {
+		let childs: any;
+		if (this.path != "") {
+			childs = [];
+			let temp: TracedFunction[] = [];
+			this.ftrace!.histogram.forEach((trace, fun) => {
+				if (this.funcsInFile.includes(fun))
+					temp.push(trace);
+			});
+			childs = temp.sort((a, b) => b.count - a.count);
+			this.funcsInFile.forEach(fun => {
+				if (!this.ftrace!.histogram.has(fun))
+					childs.push(new TracedFunction(fun, -1));
+			});
+			if (childs.length == 0)
+				childs.push("Loading...");
 		}
 		return Promise.resolve(childs);
 	}

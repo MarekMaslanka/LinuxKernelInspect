@@ -2,84 +2,69 @@ import * as sqlite from "sqlite3";
 
 export class Database
 {
-	private db = new sqlite.Database('kernel_sources/inspect.sqlite');
-	// private db = new sqlite.Database(':memory:');
+	private db = new sqlite.Database(':memory:');
 
 	public constructor()
 	{
-		// this.db.serialize(() => {
-		// 	db.run("CREATE TABLE lorem (info TEXT)");
-		// 	const stmt = db.prepare("INSERT INTO lorem VALUES (?)");
-		// 	for (let i = 0; i < 10; i++) {
-		// 		stmt.run("Ipsum " + i);
-		// 	}
-		// 	stmt.finalize();
-		// 	db.each("SELECT rowid AS id, info FROM lorem", (err, row) => {
-		// 		console.log(row.id + ": " + row.info);
-		// 	});
-		//     });
-		// this.db.serialize(() => {
 		this.db.serialize();
-			this.db.run('DROP TABLE file;', this.insertCb);
-			this.db.run('DROP TABLE function;', this.insertCb);
-			this.db.run('DROP TABLE trial;', this.insertCb);
-			this.db.run('DROP TABLE stacktrace;', this.insertCb);
-			this.db.run('DROP TABLE inspect;', this.insertCb);
-			this.db.run('DROP VIEW variables;', this.insertCb);
+		this.db.run('DROP TABLE file;', this.insertCb);
+		this.db.run('DROP TABLE function;', this.insertCb);
+		this.db.run('DROP TABLE trial;', this.insertCb);
+		this.db.run('DROP TABLE stacktrace;', this.insertCb);
+		this.db.run('DROP TABLE inspect;', this.insertCb);
+		this.db.run('DROP VIEW variables;', this.insertCb);
 
-			this.db.run('CREATE TABLE "file" (\
-				"id"	INTEGER NOT NULL UNIQUE,\
-				"path"	TEXT NOT NULL,\
-				"source"	TEXT NOT NULL,\
-				"commit_hash"	TEXT NOT NULL,\
-				PRIMARY KEY("id" AUTOINCREMENT)\
-				UNIQUE(path, source, commit_hash)\
-				)', this.insertCb);
-			this.db.run('CREATE TABLE "function" (\
-				"id"	INTEGER NOT NULL UNIQUE,\
-				"file_id"	INTEGER NOT NULL,\
-				"name"	TEXT NOT NULL,\
-				"line_start"	INTEGER NOT NULL,\
-				"line_end"	INTEGER NOT NULL,\
-				FOREIGN KEY("file_id") REFERENCES "file"("id") ON UPDATE CASCADE ON DELETE CASCADE,\
-				PRIMARY KEY("id" AUTOINCREMENT)\
-				UNIQUE(file_id, name)\
-				)', this.insertCb);
-			this.db.run('CREATE TABLE "trial" (\
-				"id"	INTEGER NOT NULL UNIQUE,\
-				"time"	INTEGER NOT NULL,\
-				"return_time"	INTEGER NOT NULL,\
-				"return_line"	INTEGER NOT NULL,\
-				"function_id"	INTEGER NOT NULL,\
-				FOREIGN KEY("function_id") REFERENCES "function"("id"),\
-				PRIMARY KEY("id" AUTOINCREMENT)\
-				)', this.insertCb);
-			this.db.run('CREATE TABLE "stacktrace" (\
-				"id"	INTEGER NOT NULL UNIQUE,\
-				"trial_id"	INTEGER NOT NULL,\
-				"stacktrace"	TEXT NOT NULL,\
-				"sum"	INTEGER NOT NULL,\
-				FOREIGN KEY("trial_id") REFERENCES "trial"("id"),\
-				PRIMARY KEY("id" AUTOINCREMENT)\
-				)', this.insertCb);
-			this.db.run('CREATE TABLE "inspect" (\
-				"id"	INTEGER NOT NULL UNIQUE,\
-				"trial_id"	INTEGER NOT NULL,\
-				"line"	INTEGER NOT NULL,\
-				"var_name"	TEXT,\
-				"var_value"	TEXT,\
-				"msg"	TEXT,\
-				FOREIGN KEY("trial_id") REFERENCES "trial"("id"),\
-				PRIMARY KEY("id" AUTOINCREMENT)\
-				)', this.insertCb);
-			this.db.run('CREATE VIEW variables AS\
-				SELECT time, var_name, var_value, line, path FROM inspect\
-				INNER JOIN trial ON trial.id = inspect.trial_id\
-				INNER JOIN function ON function.id = trial.function_id\
-				INNER JOIN file ON file.id = function.file_id',
-				this.insertCb);
-		// });
-
+		this.db.run('CREATE TABLE "file" (\
+			"id"	INTEGER NOT NULL UNIQUE,\
+			"path"	TEXT NOT NULL,\
+			"source"	TEXT NOT NULL,\
+			"commit_hash"	TEXT NOT NULL,\
+			PRIMARY KEY("id" AUTOINCREMENT)\
+			UNIQUE(path, source, commit_hash)\
+			)', this.insertCb);
+		this.db.run('CREATE TABLE "function" (\
+			"id"	INTEGER NOT NULL UNIQUE,\
+			"file_id"	INTEGER NOT NULL,\
+			"name"	TEXT NOT NULL,\
+			"line_start"	INTEGER NOT NULL,\
+			"line_end"	INTEGER NOT NULL,\
+			FOREIGN KEY("file_id") REFERENCES "file"("id") ON UPDATE CASCADE ON DELETE CASCADE,\
+			PRIMARY KEY("id" AUTOINCREMENT)\
+			UNIQUE(file_id, name)\
+			)', this.insertCb);
+		this.db.run('CREATE TABLE "trial" (\
+			"id"	INTEGER NOT NULL UNIQUE,\
+			"time"	INTEGER NOT NULL,\
+			"return_time"	INTEGER NOT NULL,\
+			"return_line"	INTEGER NOT NULL,\
+			"function_id"	INTEGER NOT NULL,\
+			FOREIGN KEY("function_id") REFERENCES "function"("id"),\
+			PRIMARY KEY("id" AUTOINCREMENT)\
+			)', this.insertCb);
+		this.db.run('CREATE TABLE "stacktrace" (\
+			"id"	INTEGER NOT NULL UNIQUE,\
+			"trial_id"	INTEGER NOT NULL,\
+			"stacktrace"	TEXT NOT NULL,\
+			"sum"	INTEGER NOT NULL,\
+			FOREIGN KEY("trial_id") REFERENCES "trial"("id"),\
+			PRIMARY KEY("id" AUTOINCREMENT)\
+			)', this.insertCb);
+		this.db.run('CREATE TABLE "inspect" (\
+			"id"	INTEGER NOT NULL UNIQUE,\
+			"trial_id"	INTEGER NOT NULL,\
+			"line"	INTEGER NOT NULL,\
+			"var_name"	TEXT,\
+			"var_value"	TEXT,\
+			"msg"	TEXT,\
+			FOREIGN KEY("trial_id") REFERENCES "trial"("id"),\
+			PRIMARY KEY("id" AUTOINCREMENT)\
+			)', this.insertCb);
+		this.db.run('CREATE VIEW variables AS\
+			SELECT time, var_name, var_value, line, path FROM inspect\
+			INNER JOIN trial ON trial.id = inspect.trial_id\
+			INNER JOIN function ON function.id = trial.function_id\
+			INNER JOIN file ON file.id = function.file_id',
+			this.insertCb);
 	}
 
 	public getAllTrials(callbackfn: (row: any) => void)
@@ -186,6 +171,6 @@ export class Database
 	}
 
 	private error(err: string) {
-		console.log(err);
+		console.log("Database error: " + err);
 	}
 }

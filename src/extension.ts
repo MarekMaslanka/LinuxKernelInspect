@@ -8,6 +8,7 @@ import { Database } from "./db";
 import TreeDecorationProvider from "./TreeDecorationProvider";
 import SqlSideViewProvider from "./SqlSideView";
 import { decorateChanges } from "./outline";
+import { Ftrace } from "./Ftrace";
 // import { CodelensProvider } from './CodelensProvider';
 
 const inspectFiles = new InspectFiles();
@@ -25,12 +26,16 @@ const stacktraceTreeProvider = new outline.StacktraceTreeProvider(undefined);
 
 const DB = new Database();
 const deku = new Deku();
+const ftrace = new Ftrace();
+const treeDecorator = new TreeDecorationProvider();
+
+const histogramTreeProvider = new outline.HistogramTreeProvider(ftrace);
 
 export function activate(context: vscode.ExtensionContext) {
 	let activeEditor = vscode.window.activeTextEditor;
 	deku.inspects = inspects;
 	deku.showInspectsForCurrentEditor = showInspectsForCurrentEditor;
-	deku.refreshOutline = refreshOutline;
+	deku.refreshSideViews = refreshSideViews;
 
 	// const codelensProvider = new CodelensProvider();
 	// vscode.languages.registerCodeLensProvider("*", codelensProvider);
@@ -48,7 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (editor) {
 			functionsMap.clear();
 			decorateChanges(editor);
-			refreshOutline();
+			refreshSideViews();
 			showInspectsForCurrentEditor();
 			sqlProvider.activatedFile(vscode.workspace.asRelativePath(editor.document.uri));
 		}
@@ -95,7 +100,7 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	context.subscriptions.push(
-		new TreeDecorationProvider(),
+		treeDecorator,
 		vscode.languages.registerCodeActionsProvider({ language: "c", scheme: "file" }, new LinuxKernelInspector(), {
 			providedCodeActionKinds: LinuxKernelInspector.providedCodeActionKinds
 		}));
@@ -113,7 +118,7 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	vscode.commands.registerCommand('outliner.outline', () => {
-		refreshOutline();
+		refreshSideViews();
 	});
 
 	vscode.commands.registerCommand('kernelinspect.remove_inspect_function', (path: string, fun: string) => {
@@ -144,12 +149,31 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
 	});
 
+	vscode.commands.registerCommand('deku.ftrace.recordall', () => {
+		trackFunctions();
+	});
+
+	vscode.commands.registerCommand('deku.gotoFunction', (file: string, funName: string) => {
+		const editor = vscode.window.activeTextEditor;
+		const visibleLines = editor?.visibleRanges;
+		const functions = getCurrentFunctionsList();
+		let line = -1;
+		functions.forEach((name, lineno) => {
+			if (funName === name)
+				line = lineno;
+		});
+		if (line != -1) {
+			const range = new vscode.Range(line - 1, 0, line + 999, 0);
+			editor!.revealRange(range);
+		}
+	});
+
 	vscode.window.registerTreeDataProvider(
 		"documentOutline",
 		treeProvider
 	);
 	vscode.window.registerTreeDataProvider(
-		"documentOutline2",
+		"inspects.file",
 		kernelInspectTreeProvider
 	);
 	vscode.window.registerTreeDataProvider(
@@ -159,6 +183,10 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.window.registerTreeDataProvider(
 		"functionStacktraceTreeProvider",
 		stacktraceTreeProvider
+	);
+	vscode.window.registerTreeDataProvider(
+		"histogram",
+		histogramTreeProvider
 	);
 
 	vscode.languages.registerHoverProvider('c', {
@@ -183,6 +211,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	setupStatusbar(deku, context.subscriptions, activeEditor);
 	deku.init(DB);
+	ftrace.init();
+	ftrace.onUpdated = () => {
+		debouncedSideViews();
+	};
 
 	DB.getAllTrials(row => {
 		// console.log(row);
@@ -207,6 +239,14 @@ export function activate(context: vscode.ExtensionContext) {
 			addInspectForTrial(trial, row.line, msg);
 		});
 	});
+}
+
+function getCurrentFunctionsList(uri?: vscode.Uri) {
+	if (!uri)
+		uri = vscode.window.activeTextEditor?.document.uri;
+	if (functionsMap.size == 0)
+		functionsMap = generateFunctionList(uri!.fsPath);
+	return functionsMap;
 }
 
 function addInspectForTrial(trial: outline.LensInspectionAtTime, line: number, value: string, name?: string) {
@@ -251,9 +291,32 @@ function decorationX(line: number, msg: string) {
 	};
 }
 
-function refreshOutline() {
+const debounce = (fn: Function, ms = 250) => {
+	let timeoutId: ReturnType<typeof setTimeout>;
+	return function (this: any, ...args: any[]) {
+		clearTimeout(timeoutId);
+		timeoutId = setTimeout(() => fn.apply(this, args), ms);
+	};
+};
+
+const debouncedSideViews = debounce(refreshSideViews);
+
+function refreshSideViews() {
+	const uri = vscode.window.activeTextEditor!.document.uri;
+	const path = vscode.workspace.asRelativePath(uri);
+	if (ftrace.isTracing(path)) {
+		const functions = getCurrentFunctionsList();
+		const funcs: string[] = [];
+		functions.forEach(fun => {
+			funcs.push(fun);
+		});
+		histogramTreeProvider.updatePath(path, funcs);
+	} else {
+		histogramTreeProvider.updatePath("", []);
+	}
+
 	for(const file of inspects.files) {
-		if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri)) {
+		if (file.file == path) {
 			treeProvider.refresh(file);
 			functionReturnsTreeProvider.refresh(file);
 			stacktraceTreeProvider.refresh(file);
@@ -295,7 +358,51 @@ function showInspectsForCurrentEditor() {
 }
 
 function startInspecting() {
-	deku.execDekuDeploy();
+	deku.execDekuDeploy(true);
+}
+
+function trackFunctions() {
+	const activeEditor = vscode.window.activeTextEditor;
+	const uri = activeEditor!.document.uri;
+	if (!uri.path.endsWith(".c") && !uri.path.endsWith(".h")) {
+		vscode.window.showWarningMessage("Current file is invalid.");
+		return;
+	}
+
+	const functions = getCurrentFunctionsList();
+	if (functions.size == 0) {
+		vscode.window.showWarningMessage("Current file does not contain valid functions.");
+		return;
+	}
+	const relPath = vscode.workspace.asRelativePath(uri);
+	histogramTreeProvider.updatePath(relPath, []);
+	vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "Configuration of functions to be tracked",
+		cancellable: false
+	}, (progress, _token) => {
+		const p = new Promise<void>(resolve => {
+			ftrace.traceFunctions(functions.values(), relPath, (fun, _success) => {
+				const step = 100 / functions.size;
+				progress.report({ increment: step, message: ` ${fun}` });
+			}, (success) => {
+				resolve();
+				if (success) {
+					const functions = getCurrentFunctionsList();
+					const funcs: string[] = [];
+					functions.forEach(fun => {
+						funcs.push(fun);
+					});
+					const path = vscode.window.activeTextEditor?.document.uri.fsPath!;
+					histogramTreeProvider.updatePath(path, funcs);
+					vscode.window.showInformationMessage("Functions are ready to track");
+				} else {
+					vscode.window.showWarningMessage("Can't track the functions. Unknown error.");
+				}
+			});
+		});
+		return p;
+	});
 }
 
 //////////////////////////////////////////////////////
@@ -307,10 +414,9 @@ export class LinuxKernelInspector implements vscode.CodeActionProvider {
 	];
 
 	public provideCodeActions(document: vscode.TextDocument, range: vscode.Range): vscode.CodeAction[] | undefined {
-		if (functionsMap.size == 0)
-			functionsMap = generateFunctionList(document.uri.path);
+		const functions = getCurrentFunctionsList();
 		const actoins = [];
-		const fun = functionsMap.get(range.start.line + 1);
+		const fun = functions.get(range.start.line + 1);
 		if (fun) {
 			actoins.push(this.createInspectAction(document, range, fun));
 			actoins.push(this.createInvokeAction(document, range, fun));

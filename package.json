@@ -23,6 +23,35 @@
 			{
 				"command": "outliner.outline",
 				"title": "Outline"
+			},
+			{
+				"command": "deku.inspect.doNotInspectFunction",
+				"title": "Do not inspect the function",
+				"icon": "$(close)"
+			},
+			{
+				"command": "deku.stacktrace.record",
+				"title": "Do not record stacktrace",
+				"icon": "$(clear-all)"
+			},
+			{
+				"command": "deku.ftrace.recordall",
+				"title": "Turn on histogram",
+				"icon": "$(graph)"
+			},
+			{
+				"command": "deku.ftrace.clear",
+				"title": "Clear histogram",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "deku.ftrace.stop",
+				"title": "Stop track the functions",
+				"icon": "$(stop-circle)"
+			},
+			{
+				"command": "deku.gotoFunction",
+				"title": "Got to function"
 			}
 		],
 		"viewsContainers": {
@@ -49,7 +78,7 @@
 					"name": "Function stacktraces"
 				},
 				{
-					"id": "documentOutline2",
+					"id": "inspects.file",
 					"name": "Inspects"
 				},
 				{
@@ -58,13 +87,53 @@
 					"name": "SQL",
 					"icon": "database",
 					"contextualTitle": "SQL"
+				},
+				{
+					"id": "histogram",
+					"name": "Histogram"
+				}
+			]
+		},
+		"menus": {
+			"view/title": [
+				{
+					"command": "deku.stacktrace.record",
+					"when": "view == functionStacktraceTreeProvider",
+					"group": "navigation"
+				},
+				{
+					"command": "deku.ftrace.stop",
+					"when": "view == histogram",
+					"group": "navigation"
+				},
+				{
+					"command": "deku.ftrace.clear",
+					"when": "view == histogram",
+					"group": "navigation"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "deku.inspect.doNotInspectFunction",
+					"when": "view == inspects.file && viewItem == functionInspect",
+					"group": "inline"
 				}
 			]
 		},
 		"viewsWelcome": [
 			{
-				"view": "inspect-explorer",
-				"contents": "Welcome"
+			  "view": "histogram",
+			  "contents": "Keep track of which functions are called from this file.\n[Track the functions](command:deku.ftrace.recordall)"
+			}
+		],
+		"colors": [
+			{
+				"id": "deku.histogram.treeItem.inactive",
+				"description": "Color for an inactive function in histogram",
+				"defaults": {
+					"dark": "#999999",
+					"light": "#999999"
+				}
 			}
 		],
 		"configuration": {
@@ -88,7 +157,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "16.18.1",
-		"@types/vscode": "1.52.0",
+		"@types/vscode": "1.72.0",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
 		"@vscode/codicons": "0.0.20",

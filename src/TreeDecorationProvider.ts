@@ -24,10 +24,26 @@ export default class implements FileDecorationProvider, Disposable {
         this.disposable.dispose();
     }
 
+	async updateActiveEditor(fun: string): Promise<void>  {
+		this.onDidChangeDecorationEmitter.fire(undefined);
+		// if (activeTab.input instanceof TabInputText)
+		//   this._onDidChangeFileDecorations.fire(activeTab.input.uri);
+
+		// // filter to get only non-activeTabs
+		// activeTab.group.tabs.map( tab => {
+		//   if (!tab.isActive && tab.input instanceof TabInputText)
+		// 	this._onDidChangeFileDecorations.fire(tab.input.uri);
+		// });
+	  }
+
     provideFileDecoration(uri: Uri): FileDecoration | undefined {
-	if (uri.toString().includes("AAA"))
-		return this.getDecorator(uri.query.substring(0, 6), 'gitDecoration.untrackedResourceForeground');
-	return undefined;
+		if (uri.toString().includes("AAA"))
+			return this.getDecorator(uri.query.substring(0, 6), 'gitDecoration.untrackedResourceForeground');
+		else if (uri.path === "/deku.histogram" && uri.fragment == "-1")
+			return {
+				color: new ThemeColor("deku.histogram.treeItem.inactive")
+			};
+		return undefined;
     }
 
     /**

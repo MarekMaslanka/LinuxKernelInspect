@@ -12,8 +12,8 @@ export class DEKUConfig
 {
 	public path = "";
 	public workdir = "";
-	public address = "localhost";
-	public port = 2233;
+	public address = "";
+	public port = 0;
 
 	public constructor()
 	{
@@ -25,6 +25,24 @@ export class DEKUConfig
 		let configuration = vscode.workspace.getConfiguration("dekuinspect");
 		this.path = configuration.get("path") + "/";
 		this.workdir = this.path+"workdir/";
+
+		const buffer = fs.readFileSync(this.workdir+"config", "utf-8");
+		buffer.split("\n").forEach((line) => {
+			const regexp = /^DEPLOY_PARAMS="(\w+)?@?([^:]+):?(\d+)?"$/;
+			const match = regexp.exec(line);
+			if (match != null) {
+				const user = match[1];
+				const host = match[2];
+				if (user == undefined)
+					this.address = host;
+				else
+					this.address = `${user}@${host}`
+				if (match[3] == undefined)
+					this.port = 22;
+				else
+					this.port = Number.parseInt(match[3]);
+			}
+		});
 	}
 }
 
@@ -47,7 +65,6 @@ export class InspectFiles {
 			return;
 		const buffer = fs.readFileSync(file, "utf-8");
 		buffer.split("\n").forEach((line) => {
-			console.log(line);
 			const regexp = new RegExp("^([\\w/\\.-]+):(\\w+):(.+)$", "g");
 			const match = regexp.exec(line);
 			if (match != null) {
@@ -92,7 +109,7 @@ export class Deku
 {
 	private DB!: Database;
 	public showInspectsForCurrentEditor = () =>{};
-	public refreshOutline = () =>{};
+	public refreshSideViews = () =>{};
 	public inspects!: outline.LensInspectionRoot;
 
 	public async init(DB: Database) {
@@ -131,8 +148,7 @@ export class Deku
 		vscode.window.showInformationMessage("Please reload VSCode to apply new settings.");
 	}
 
-	public async execDekuDeploy() {
-		if (true) return;
+	public async execDekuDeploy(isInspection: boolean) {
 		updateStatusBarItem(true);
 
 		vscode.window.withProgress({
@@ -140,10 +156,6 @@ export class Deku
 			title: "Applying inspection...",
 			cancellable: false
 		}, (progress, token) => {
-			// setTimeout(() => {
-			// 	progress.report({ increment: 10, message: "long running! - still going..." });
-			// }, 1000);
-
 			const p = new Promise<void>(resolve => {
 				try {
 					axios
@@ -159,9 +171,12 @@ export class Deku
 							result = lines[lines.length - 2];
 						if (result.indexOf("[0;") == 1)
 							result = result.substring(7, result.length - 4);
-						if (result.includes("successfully") || result.includes("done"))
-							vscode.window.showInformationMessage(result);
-						else if (result.includes("No modules need to upload"))
+						if (result.includes("successfully") || result.includes("done")) {
+							if (isInspection)
+								vscode.window.showInformationMessage("Inspection applied successfuly");
+							else
+								vscode.window.showInformationMessage(result);
+						} else if (result.includes("No modules need to upload"))
 							vscode.window.showInformationMessage("No changes detected since last run");
 						else
 							vscode.window.showErrorMessage("An error has occurred when performed DEKU Apply. See the logs for details.");
@@ -311,7 +326,7 @@ export class Deku
 			refreshOutlineTree = true;
 			return [refreshInspects, refreshOutlineTree];
 		}
-		console.log(line);
+		console.log("Invalid DEKU Inspect line: " + line);
 		return [refreshInspects, refreshOutlineTree];
 	}
 
@@ -320,9 +335,11 @@ export class Deku
 		const cproc = await require('child_process');
 		const spawn = cproc.spawn;
 
-		const args = ["-i", conf.workdir + "/testing_rsa", "-o", "StrictHostKeyChecking=no",
-					"-o", "UserKnownHostsFile=/dev/null", "-tt", "root@"+conf.address,
-					"-p", conf.port, "cat", "/sys/kernel/debug/deku/inspect"];
+		const args = ["-i", conf.workdir + "/testing_rsa",
+					"-o StrictHostKeyChecking no", "-o UserKnownHostsFile=/dev/null",
+					"-o ControlPath=/tmp/ssh-deku-%r@%h:%p", "-o ControlMaster=auto",
+					"-tt", conf.address, "-p", conf.port,
+					"while true; do cat /sys/kernel/debug/deku/inspect; sleep 1; done"];
 		const child = spawn("ssh", args);
 
 		const buffer = Buffer.alloc(1024*100);
@@ -340,10 +357,10 @@ export class Deku
 				buffer[bufferIndex++] = data[i];
 			}
 			if (refreshInspects) {
-				this.refreshOutline();
+				this.refreshSideViews();
 				this.showInspectsForCurrentEditor();
 			} else if (refreshOutlineTree) {
-				this.refreshOutline();
+				this.refreshSideViews();
 			}
 		});
 
