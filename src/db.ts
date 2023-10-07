@@ -7,12 +7,12 @@ export class Database
 	public constructor()
 	{
 		this.db.serialize();
-		this.db.run('DROP TABLE file;', this.insertCb);
-		this.db.run('DROP TABLE function;', this.insertCb);
-		this.db.run('DROP TABLE trial;', this.insertCb);
-		this.db.run('DROP TABLE stacktrace;', this.insertCb);
-		this.db.run('DROP TABLE inspect;', this.insertCb);
-		this.db.run('DROP VIEW variables;', this.insertCb);
+		this.db.run('DROP TABLE IF EXISTS file;', this.insertCb);
+		this.db.run('DROP TABLE IF EXISTS function;', this.insertCb);
+		this.db.run('DROP TABLE IF EXISTS trial;', this.insertCb);
+		this.db.run('DROP TABLE IF EXISTS stacktrace;', this.insertCb);
+		this.db.run('DROP TABLE IF EXISTS inspect;', this.insertCb);
+		this.db.run('DROP VIEW IF EXISTS variables;', this.insertCb);
 
 		this.db.run('CREATE TABLE "file" (\
 			"id"	INTEGER NOT NULL UNIQUE,\
@@ -94,12 +94,12 @@ export class Database
 	public startTrial(file: string, line: number, endLine: number, funName: string, time: number, calledFrom: string): void
 	{
 		this.db.serialize(() => {
-			this.db.run("INSERT INTO file (path, source, commit_hash) VALUES ($path, $source, $commit)", {
+			this.db.run("INSERT OR IGNORE INTO file (path, source, commit_hash) VALUES ($path, $source, $commit)", {
 					$path: file,
 					$source: "",
 					$commit: ""
 				}, this.insertCb);
-			this.db.run("INSERT INTO function (name, line_start, line_end, file_id) VALUES ($name, $lineStart, $lineEnd, (SELECT id FROM file WHERE path = $path LIMIT 1))", {
+			this.db.run("INSERT OR IGNORE INTO function (name, line_start, line_end, file_id) VALUES ($name, $lineStart, $lineEnd, (SELECT id FROM file WHERE path = $path LIMIT 1))", {
 				$name: funName,
 				$lineStart: line,
 				$lineEnd: endLine,

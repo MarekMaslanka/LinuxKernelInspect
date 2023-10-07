@@ -1,12 +1,12 @@
 {
-	"name": "deku.kernel.inspector",
+	"name": "dekukernelinspector",
 	"description": "Kernel source inspection tool",
 	"version": "0.0.1",
 	"publisher": "marek.maslanka",
 	"private": true,
 	"license": "MIT",
 	"engines": {
-		"vscode": "^1.47.0"
+		"vscode": "^1.72.0"
 	},
 	"categories": [
 		"Other"
@@ -25,7 +25,7 @@
 				"title": "Outline"
 			},
 			{
-				"command": "deku.inspect.doNotInspectFunction",
+				"command": "kernelinspect.remove_inspect_function",
 				"title": "Do not inspect the function",
 				"icon": "$(close)"
 			},
@@ -114,7 +114,7 @@
 			],
 			"view/item/context": [
 				{
-					"command": "deku.inspect.doNotInspectFunction",
+					"command": "kernelinspect.remove_inspect_function",
 					"when": "view == inspects.file && viewItem == functionInspect",
 					"group": "inline"
 				}
@@ -122,8 +122,8 @@
 		},
 		"viewsWelcome": [
 			{
-			  "view": "histogram",
-			  "contents": "Keep track of which functions are called from this file.\n[Track the functions](command:deku.ftrace.recordall)"
+				"view": "histogram",
+				"contents": "Keep track of which functions are called from this file.\n[Track the functions](command:deku.ftrace.recordall)"
 			}
 		],
 		"colors": [
@@ -140,12 +140,36 @@
 			"type": "object",
 			"title": "DEKU Inspect",
 			"properties": {
-			    "dekuinspect.path": {
-				"type": "string",
-				"default": "",
-				"description": "Path to DEKU",
-				"scope": "machine"
-			    }
+				"dekuinspect.path": {
+					"type": "string",
+					"default": "",
+					"description": "Path to DEKU",
+					"scope": "machine"
+				},
+				"dekuinspect.board": {
+					"type": "string",
+					"default": "",
+					"description": "Board name",
+					"scope": "machine"
+				},
+				"dekuinspect.address": {
+					"type": "string",
+					"default": "127.0.0.1",
+					"description": "Device address",
+					"scope": "machine"
+				},
+				"dekuinspect.user": {
+					"type": "string",
+					"default": "22",
+					"description": "Username",
+					"scope": "machine"
+				},
+				"dekuinspect.sshPort": {
+					"type": "integer",
+					"default": "22",
+					"description": "SSH Port",
+					"scope": "machine"
+				}
 			}
 		}
 	},

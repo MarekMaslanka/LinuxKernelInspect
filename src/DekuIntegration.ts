@@ -11,6 +11,7 @@ import { updateStatusBarItem } from "./statusbar";
 export class DEKUConfig
 {
 	public path = "";
+	public board = "";
 	public workdir = "";
 	public address = "";
 	public port = 0;
@@ -23,26 +24,15 @@ export class DEKUConfig
 	private loadConfig()
 	{
 		let configuration = vscode.workspace.getConfiguration("dekuinspect");
-		this.path = configuration.get("path") + "/";
-		this.workdir = this.path+"workdir/";
-
-		const buffer = fs.readFileSync(this.workdir+"config", "utf-8");
-		buffer.split("\n").forEach((line) => {
-			const regexp = /^DEPLOY_PARAMS="(\w+)?@?([^:]+):?(\d+)?"$/;
-			const match = regexp.exec(line);
-			if (match != null) {
-				const user = match[1];
-				const host = match[2];
-				if (user == undefined)
-					this.address = host;
-				else
-					this.address = `${user}@${host}`
-				if (match[3] == undefined)
-					this.port = 22;
-				else
-					this.port = Number.parseInt(match[3]);
-			}
-		});
+		if (configuration.get("path") != "") {
+			this.path = configuration.get("path") + "/";
+		}
+		this.workdir = this.path + "workdir" + "/";
+		this.board = configuration.get("board") || "";
+		if (this.board != null)
+			this.workdir = this.path + "workdir_" + this.board + "/";
+		this.address = configuration.get("target")!;
+		this.port = Number.parseInt(configuration.get<string>("sshPort")!);
 	}
 }
 
@@ -114,8 +104,9 @@ export class Deku
 
 	public async init(DB: Database) {
 		this.DB = DB;
+		const conf = new DEKUConfig();
 		const configuration = vscode.workspace.getConfiguration("dekuinspect");
-		if (configuration.get("path") == "")
+		if (conf.path == "" || conf.board == "")
 		{
 			vscode.window.showInformationMessage("Please provide path to the DEKU in the settings.");
 
@@ -138,6 +129,14 @@ export class Deku
 				}
 			});
 		}
+		else if (conf.board == "")
+		{
+			vscode.window.showInformationMessage("Please provide Chromebook board name in the settings.");
+		}
+		else if (conf.address == "")
+		{
+			vscode.window.showInformationMessage("Please provide address to the device.");
+		}
 		else
 		{
 			this.runListenenServer(0);
@@ -150,42 +149,42 @@ export class Deku
 
 	public async execDekuDeploy(isInspection: boolean) {
 		updateStatusBarItem(true);
+		const conf = new DEKUConfig();
 
 		vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
 			title: "Applying inspection...",
 			cancellable: false
-		}, (progress, token) => {
+		}, () => {
 			const p = new Promise<void>(resolve => {
-				try {
-					axios
-					.get("http://localhost:8090")
-					.then(function (response) {
-						resolve();
-						updateStatusBarItem(false);
-						const text = response.data;
-						console.log("DEKU reponse:\n" + text);
-						const lines = text.split('\n');
-						let result: string = lines[lines.length - 1];
-						if (result == "" && lines.length > 1)
-							result = lines[lines.length - 2];
-						if (result.indexOf("[0;") == 1)
-							result = result.substring(7, result.length - 4);
-						if (result.includes("successfully") || result.includes("done")) {
-							if (isInspection)
-								vscode.window.showInformationMessage("Inspection applied successfuly");
-							else
-								vscode.window.showInformationMessage(result);
-						} else if (result.includes("No modules need to upload"))
-							vscode.window.showInformationMessage("No changes detected since last run");
+				axios
+				.get("http://localhost:8090/deploy?board="+conf.board+"&target=localhost&port="+conf.port, { timeout: 15000 })
+				.then(function (response) {
+					const text = response.data;
+					console.log("Response from inspectd:\n" + text);
+					const lines = text.split('\n');
+					let result: string = lines[lines.length - 1];
+					if (result == "" && lines.length > 1)
+						result = lines[lines.length - 2];
+					if (result.indexOf("[0;") == 1)
+						result = result.substring(7, result.length - 4);
+					if (result.includes("successfully") || result.includes("done")) {
+						if (isInspection)
+							vscode.window.showInformationMessage("Inspection applied successfuly");
 						else
-							vscode.window.showErrorMessage("An error has occurred when performed DEKU Apply. See the logs for details.");
-					});
-				} catch (error) {
+							vscode.window.showInformationMessage(result);
+					} else if (result.includes("No modules need to upload"))
+						vscode.window.showInformationMessage("No changes detected since last run");
+					else
+						vscode.window.showErrorMessage("An error has occurred when performed DEKU Apply. See the logs for details.");
+				}).catch(reason => {
+						vscode.window.showErrorMessage(`Cannot connect to DEKU Daemon (${reason}).`);
+						console.error(`Cannot connect to DEKU Daemon (${reason}).`);
+				})
+				.finally(() => {
 					resolve();
 					updateStatusBarItem(false);
-					console.error(error);
-				}
+				});
 			});
 			return p;
 		});
@@ -342,7 +341,7 @@ export class Deku
 					"while true; do cat /sys/kernel/debug/deku/inspect; sleep 1; done"];
 		const child = spawn("ssh", args);
 
-		const buffer = Buffer.alloc(1024*100);
+		const buffer = Buffer.alloc(1024 * 100);
 		let bufferIndex = 0;
 		child.stdout.on('data', (data: Buffer) => {
 			let refreshInspects = false;

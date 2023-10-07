@@ -146,7 +146,11 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	vscode.commands.registerCommand('kernelinspect.open_file_fun', (file: string, funcName: string) => {
-		vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
+        const workspaceFolder = vscode.workspace.workspaceFolders![0];
+		const path = workspaceFolder.uri.path + "/" + file;
+		vscode.window.showTextDocument(vscode.Uri.file(path), { preview: false }).then(editor => {
+			vscode.commands.executeCommand('deku.gotoFunction', file, funcName);
+		});
 	});
 
 	vscode.commands.registerCommand('deku.ftrace.recordall', () => {
@@ -378,7 +382,7 @@ function trackFunctions() {
 	histogramTreeProvider.updatePath(relPath, []);
 	vscode.window.withProgress({
 		location: vscode.ProgressLocation.Notification,
-		title: "Configuration of functions to be tracked",
+		title: "Configure the functions to be tracked",
 		cancellable: false
 	}, (progress, _token) => {
 		const p = new Promise<void>(resolve => {
@@ -429,11 +433,21 @@ export class LinuxKernelInspector implements vscode.CodeActionProvider {
 		const path = vscode.workspace.asRelativePath(document.uri);
 		if (inspectFiles.isInspected(path, funName)) {
 			action = new vscode.CodeAction(`Remove inspection from the function`, vscode.CodeActionKind.Empty);
-			action.command = { command: 'kernelinspect.remove_inspect_function', title: 'Remove-LinuxKernelInspect-Title', tooltip: 'Remove-LinuxKernelInspect-Tooltip.', arguments: [path, funName] };
+			action.command = {
+				command: 'kernelinspect.remove_inspect_function',
+				title: 'Remove-LinuxKernelInspect-Title',
+				tooltip: 'Remove-LinuxKernelInspect-Tooltip.',
+				arguments: [path, funName]
+			};
 		} else {
 			const line = document.lineAt(range.start).text;
 			action = new vscode.CodeAction(`Inspect the function`, vscode.CodeActionKind.Empty);
-			action.command = { command: 'kernelinspect.inspect_function', title: 'LinuxKernelInspect-Title', tooltip: 'LinuxKernelInspect-Tooltip.', arguments: [path, funName, line] };
+			action.command = {
+				command: 'kernelinspect.inspect_function',
+				title: 'LinuxKernelInspect-Title',
+				tooltip: 'LinuxKernelInspect-Tooltip.',
+				arguments: [path, funName, line]
+			};
 		}
 		return action;
 	}
