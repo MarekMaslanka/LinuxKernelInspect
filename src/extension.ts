@@ -126,7 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
 		kernelInspectTreeProvider.refresh(inspectFiles.inspections);
 	});
 
-	vscode.commands.registerCommand('kernelinspect.show_inspect_for', (time: outline.LensInspectionAtTime) => {
+	vscode.commands.registerCommand('kernelinspect.show_inspect_for', (time: outline.LensInspectionTrial) => {
 		time.fun.showInspectFor = time;
 		const lines = new Map<number, string[]>();
 		inspects.files.forEach(file => {
@@ -220,18 +220,18 @@ export function activate(context: vscode.ExtensionContext) {
 		debouncedSideViews();
 	};
 
+	// remove?
 	DB.getAllTrials(row => {
 		// console.log(row);
-		const func = inspects.getOrCreateFunc(row.path, row.name, row.line_start, row.line_end);
+		const func = inspects.getOrCreateFunc(0, row.path, row.name, row.line_start, row.line_end);
 		const time = row.time as number;
 		const timeStr = time.toString();
-		const trial = new outline.LensInspectionAtTime(func, time, timeStr);
+		const trial = new outline.LensInspectionTrial(0, func, time, timeStr);
 		trial.returnAtLine = row.return_line ? row.return_line : row.line_end;
 		trial.returnTime = row.return_time;
 		trial.stacktrace = row.stacktrace;
 		trial.stacktraceSum = row.stacktraceSum;
-		const trialIndex = func.times.length;
-		func.times.push(trial);
+		func.trials.push(trial);
 		addInspectForTrial(trial, row.line_start, "execute time: "+"execTime");
 		if (row.return_line) {
 			addInspectForTrial(trial, row.line_end, "return here");
@@ -253,7 +253,7 @@ function getCurrentFunctionsList(uri?: vscode.Uri) {
 	return functionsMap;
 }
 
-function addInspectForTrial(trial: outline.LensInspectionAtTime, line: number, value: string, name?: string) {
+function addInspectForTrial(trial: outline.LensInspectionTrial, line: number, value: string, name?: string) {
 	const vars = trial.lines.get(line) != undefined ? trial.lines.get(line) : trial.lines.set(line, []).get(line);
 	vars!.push(value);
 }
@@ -352,8 +352,8 @@ function showInspectsForCurrentEditor() {
 	inspects.files.forEach(file => {
 		if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri))
 			file.functions.forEach(func => {
-				if (func.times.length)
-					func.times[func.times.length - 1].lines.forEach((values, line) => {
+				if (func.trials.length)
+					func.trials[func.trials.length - 1].lines.forEach((values, line) => {
 						lines.set(line, values);
 					});
 			});

@@ -159,7 +159,7 @@
         },
         "dekuinspect.user": {
           "type": "string",
-          "default": "22",
+          "default": "root",
           "description": "Username",
           "scope": "machine"
         },
