@@ -4,7 +4,6 @@ import * as path from 'path';
 import { InspectFunction } from "./DekuIntegration";
 import { Ftrace, TracedFunction } from "./Ftrace";
 
-// TODO: Change to "trial" specific name
 export class LensInspectionTrial {
 	trialId!: number;
 	time!: number;
@@ -321,9 +320,7 @@ export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
 					items.push(new ReturnItem(trial));
 				}
 			});
-			if (retLines.length > 1) {
-				childs = items;
-			}
+			childs = items;
 		} else if (element instanceof ReturnItem) {
 			const items: LensInspectionTrial[] = [];
 			element.time.fun.trials.forEach(trial => {
@@ -335,12 +332,15 @@ export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
 		} else if (this.inspections) {
 			const items: LensInspectionFunction[] = [];
 			this.inspections?.functions.forEach(func => {
-				const firstRet = func.times[0].returnAtLine;
-				for (let i = 1; i < func.times.length; i++) {
-					if (func.times[i].returnAtLine != firstRet) {
-						items.push(func);
+				let found = false;
+				for (let i = 0; i < items.length; i++) {
+					if (func.name === items[i].name) {
+						found = true;
 						break;
 					}
+				}
+				if (!found)	{
+					items.push(func);
 				}
 			});
 			childs = items;
@@ -384,8 +384,13 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 			item.time.stacktrace.forEach(line => {
 				titem.tooltip += line + "\n";
 			});
-			for (let i = 0; i < 4; i++)
-				titem.description += item.time.stacktrace[i].split("+")[0]+", ";
+			let cnt = 0;
+			item.time.stacktrace.forEach(fun => {
+				if (cnt < 4 && fun.indexOf("+") > 0) {
+					titem.description += fun.split("+")[0]+", ";
+					cnt++;
+				}
+			});
 			titem.description += "...";
 			titem.iconPath = new vscode.ThemeIcon('layers');
 			return titem;
@@ -418,9 +423,7 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 					items.push(new StacktraceItem(time, items.length+1));
 				}
 			});
-			if (stackSum.length > 1) {
-				childs = items;
-			}
+			childs = items;
 		} else if (element instanceof StacktraceItem) {
 			const items: LensInspectionTrial[] = [];
 			element.time.fun.trials.forEach(time => {
@@ -432,12 +435,15 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 		} else if (this.inspections) {
 			const items: LensInspectionFunction[] = [];
 			this.inspections?.functions.forEach(func => {
-				const firstSum = func.times[0].stacktraceSum;
-				for (let i = 1; i < func.times.length; i++) {
-					if (func.times[i].stacktraceSum != firstSum) {
-						items.push(func);
+				let found = false;
+				for (let i = 0; i < items.length; i++) {
+					if (func.name === items[i].name) {
+						found = true;
 						break;
 					}
+				}
+				if (!found)	{
+					items.push(func);
 				}
 			});
 			childs = items;

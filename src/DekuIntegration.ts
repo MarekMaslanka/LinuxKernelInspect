@@ -301,11 +301,10 @@ export class Deku
 			if (trial === undefined) {
 				return [false, false];
 			}
-			let line = undefined;
-			if (match[3] == "return") {
-				line = Number.parseInt(match[5]);
+			let line = Number.parseInt(match[5]);
+			trial.returnAtLine = line;
+			if (match[3] === "return") {
 				outline.addInspectInformation(this.inspects, trialId, file, line, "return here");
-				trial.returnAtLine = line;
 			}
 			trial.returnTime = time;
 			const t1 = trial.time;
@@ -330,14 +329,17 @@ export class Deku
 			const func = this.inspects.getFunction(file, funName);
 			const text = match[5];
 			const trial = func?.getTrial(trialId);
+
 			if (trial === undefined) {
 				return [false, false];
 			}
+
 			trial.stacktraceSum = CRC32.str(text);
-			text.substring(0, text.length - 2).split(',').forEach(line => {
+			text.substring(0, text.length - 1).split(',').forEach(line => {
 				line = line.split(" ")[0];
-				if (trial.stacktrace.length != 0 || line.split("+")[0] != funName)
-				trial.stacktrace.push(line);
+				if (trial.stacktrace.length !== 0 || line.split("+")[0] !== funName) {
+					trial.stacktrace.push(line);
+				}
 			});
 			this.DB.addStacktrace(trialId, file, funName, text, trial.stacktraceSum);
 			refreshOutlineTree = true;
