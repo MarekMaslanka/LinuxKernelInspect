@@ -16,6 +16,7 @@ export class LensInspectionTrial {
 	returnTime!: number;
 	timeDiff = 0;
 	calledFrom = "";
+	procName = "";
 
 	public constructor(trialId: number, fun: LensInspectionFunction, time: number, textTime: string) {
 		this.trialId = trialId;
@@ -183,7 +184,7 @@ export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
 			return titem;
 		} else if (item instanceof LensInspectionTrial) {
 			const titem = new vscode.TreeItem(
-				item.textTime, vscode.TreeItemCollapsibleState.None
+				"["+item.procName+"] "+item.textTime, vscode.TreeItemCollapsibleState.None
 			);
 			titem.command = {
 				command: 'kernelinspect.show_inspect_for',
@@ -293,7 +294,7 @@ export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
 			return titem;
 		} else if (item instanceof LensInspectionTrial) {
 			const titem = new vscode.TreeItem(
-				item.textTime, vscode.TreeItemCollapsibleState.None
+				"["+item.procName+"] "+item.textTime, vscode.TreeItemCollapsibleState.None
 			);
 			titem.command = {
 				command: 'kernelinspect.show_inspect_for',
@@ -396,7 +397,7 @@ export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 			return titem;
 		} else if (item instanceof LensInspectionTrial) {
 			const titem = new vscode.TreeItem(
-				item.textTime, vscode.TreeItemCollapsibleState.None
+				"["+item.procName+"] "+item.textTime, vscode.TreeItemCollapsibleState.None
 			);
 			titem.command = {
 				command: 'kernelinspect.show_inspect_for',

@@ -30,6 +30,12 @@ export class Database {
 			PRIMARY KEY("id" AUTOINCREMENT),\
 			UNIQUE(file_id, name)\
 			)', this.insertCb);
+		this.db.run('CREATE TABLE "process" (\
+			"pid"	INTEGER NOT NULL UNIQUE,\
+			"name"	TEXT NOT NULL,\
+			PRIMARY KEY("pid"),\
+			UNIQUE(pid, name)\
+			)', this.insertCb);
 		this.db.run('CREATE TABLE "trial" (\
 			"id"	INTEGER NOT NULL,\
 			"time"	INTEGER NOT NULL,\
@@ -37,7 +43,9 @@ export class Database {
 			"return_line"	INTEGER NOT NULL,\
 			"function_id"	INTEGER NOT NULL,\
 			"stacktrace"	INTEGER,\
+			"pid"			INTEGER,\
 			FOREIGN KEY("function_id") REFERENCES "function"("id")\
+			FOREIGN KEY("pid") REFERENCES "process"("pid")\
 			)', this.insertCb);
 		this.db.run('CREATE TABLE "stacktrace" (\
 			"id"	INTEGER NOT NULL UNIQUE,\
@@ -164,6 +172,21 @@ export class Database {
 		if (key) {
 			this.addLineInspect(trialId, file, line, key, value);
 		}
+	}
+
+	public functionPID(trialId: number, file: string, funName: string, pid: number, name: string) {
+		this.db.serialize(() => {
+			this.db.run("INSERT OR IGNORE INTO process (pid, name) VALUES ($pid, $name)", {
+				$pid: pid,
+				$name: name,
+			}, this.insertCb);
+			this.db.run("UPDATE trial SET pid = $pid WHERE id = $trialId AND function_id = (SELECT id FROM function WHERE name = $funName AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1)", {
+				$pid: pid,
+				$trialId: trialId,
+				$funName: funName,
+				$path: file
+			}, this.insertCb);
+		});
 	}
 
 	private insertCb(err: Error | null) {

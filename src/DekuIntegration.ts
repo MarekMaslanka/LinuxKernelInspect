@@ -231,14 +231,15 @@ export class Deku
 			const calledFrom = match[7];
 			const func = this.inspects.getOrCreateFunc(trialId, file, funName, line, lineEnd);
 			const timeStr = (time/1000000000.0).toFixed(6);
-			func.trials.push(new outline.LensInspectionTrial(trialId, func, time, timeStr));
+			const trial = new outline.LensInspectionTrial(trialId, func, time, timeStr);
+			func.trials.push(trial);
 			if (func.showInspectFor.time === 0) {
 				func.showInspectFor = func.trials[0];
 			}
 			else {
-				func.trials[func.trials.length - 1].timeDiff = func.trials[func.trials.length - 2].time - time;
+				trial.timeDiff = func.trials[func.trials.length - 2].time - time;
 			}
-			func.trials[func.trials.length - 1].calledFrom = calledFrom;
+			trial.calledFrom = calledFrom;
 			this.DB.startTrial(trialId, file, line, lineEnd, funName, time, calledFrom);
 			return [refreshInspects, refreshOutlineTree];
 		}
@@ -343,6 +344,26 @@ export class Deku
 			});
 			this.DB.addStacktrace(trialId, file, funName, text, trial.stacktraceSum);
 			refreshOutlineTree = true;
+			return [refreshInspects, refreshOutlineTree];
+		}
+		regexp = new RegExp("^DEKU Inspect: PID: (\\d+):(.+):(.+):(\\d+):(.+)$", "g");
+		match = regexp.exec(line);
+		if (match !== null) {
+			const trialId = Number.parseInt(match[1]);
+			const file = match[2];
+			const funName = match[3];
+			const pid = Number.parseInt(match[4]);
+			const procName = match[5];
+
+			const func = this.inspects.getFunction(file, funName);
+			const trial = func?.getTrial(trialId);
+			if (trial === undefined) {
+				return [false, false];
+			}
+
+			trial.procName = procName;
+			this.DB.functionPID(trialId, file, funName, pid, procName);
+			refreshInspects = true;
 			return [refreshInspects, refreshOutlineTree];
 		}
 		console.log("Invalid DEKU Inspect line: " + line);
