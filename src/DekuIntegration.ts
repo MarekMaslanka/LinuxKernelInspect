@@ -5,7 +5,6 @@ import fs = require("fs");
 import axios from "axios";
 
 import { Database } from "./db";
-import * as outline from "./outline";
 import { updateStatusBarItem } from "./statusbar";
 
 export class DEKUConfig
@@ -49,7 +48,7 @@ export class InspectFiles {
 		return conf.workdir+"tracefile";
 	}
 
-	public read() {
+	public read(db: Database) {
 		const file = this.inspectFile();
 		if (!fs.existsSync(file))
 			return;
@@ -59,6 +58,7 @@ export class InspectFiles {
 			const match = regexp.exec(line);
 			if (match != null) {
 				this.inspections.push({ file: match[1], fun: match[2], pattern: match[3] });
+				db.addFunToInspect(match[1], match[2]);
 			}
 		});
 	}
@@ -100,7 +100,6 @@ export class Deku
 	private DB!: Database;
 	public showInspectsForCurrentEditor = () =>{};
 	public refreshSideViews = () =>{};
-	public inspects!: outline.LensInspectionRoot;
 
 	public async init(DB: Database) {
 		this.DB = DB;
@@ -193,35 +192,34 @@ export class Deku
 	private parseInspectLine(line: string) : [boolean, boolean]{
 		let refreshInspects = false;
 		let refreshOutlineTree = false;
-		console.log(line);
+		// console.log(line);
 		let regexp = new RegExp("^\\[(\\d+)\\]\\[(\\d+)\\] DEKU Inspect: (.+):(\\d+) (.+ =)? (.+)$", "g");
 		let match = regexp.exec(line);
-		if (match != null) {
+		if (match !== null) {
 			let key = "";
 			let msg = "";
 			const trialId = Number.parseInt(match[2]);
 			const file = match[3];
 			const line = Number.parseInt(match[4]);
-			if (match.length == 7) {
+			if (match.length === 7) {
 				key = match[5];
 				msg = match[6];
 				key = key.substring(0, key.length - 2);
 				this.DB.addLineInspect(trialId, file, line, key, msg);
-				if (msg == "0x0000000000000000")
+				if (msg === "0x0000000000000000") {
 					msg = "NULL";
-				msg = key + ": " + msg;
+				}
 			}
 			else {
 				msg = match[5];
 				this.DB.addLineInspect(trialId, file, line, msg);
 			}
-			outline.addInspectInformation(this.inspects, trialId, file, line, msg);
 			refreshInspects = true;
 			return [refreshInspects, refreshOutlineTree];
 		}
 		regexp = new RegExp("^\\[(\\d+)\\]\\[(\\d+)\\] DEKU Inspect: Function: (.+):(.+):(\\d+):(\\d+):(.+)$", "g");
 		match = regexp.exec(line);
-		if (match != null) {
+		if (match !== null) {
 			const time = Number.parseInt(match[1]);
 			const trialId = Number.parseInt(match[2]);
 			const file = match[3];
@@ -229,30 +227,17 @@ export class Deku
 			const line = Number.parseInt(match[5]);
 			const lineEnd = Number.parseInt(match[6]);
 			const calledFrom = match[7];
-			const func = this.inspects.getOrCreateFunc(trialId, file, funName, line, lineEnd);
-			const timeStr = (time/1000000000.0).toFixed(6);
-			const trial = new outline.LensInspectionTrial(trialId, func, time, timeStr);
-			func.trials.push(trial);
-			if (func.showInspectFor.time === 0) {
-				func.showInspectFor = func.trials[0];
-			}
-			else {
-				trial.timeDiff = func.trials[func.trials.length - 2].time - time;
-			}
-			trial.calledFrom = calledFrom;
 			this.DB.startTrial(trialId, file, line, lineEnd, funName, time, calledFrom);
 			return [refreshInspects, refreshOutlineTree];
 		}
 		regexp = new RegExp("^\\[(\\d+)\\]\\[(\\d+)\\] DEKU Inspect: Function Pointer: (.+):(\\d+):(.+):(.+)$", "g");
 		match = regexp.exec(line);
-		if (match != null) {
+		if (match !== null) {
 			const trialId = Number.parseInt(match[2]);
 			const file = match[3];
 			const line = Number.parseInt(match[4]);
 			const varName = match[5];
 			const val = match[6];
-			const msg = varName + ": " + val;
-			outline.addInspectInformation(this.inspects, trialId, file, line, msg);
 			this.DB.addLineInspect(trialId, file, line, varName, val);
 			refreshInspects = true;
 			return [refreshInspects, refreshOutlineTree];
@@ -265,84 +250,30 @@ export class Deku
 			const file = match[3];
 			const line = Number.parseInt(match[4]);
 			const funName = match[5];
-			let msg = "return " + match[6] + ": " + match[7];
-			if (match[6] === "true" || match[6] === "false") {
-				msg = "return " + match[6];
-			}
-			outline.addInspectInformation(this.inspects, trialId, file, line, msg);
-			const func = this.inspects.getFunction(file, funName);
-			const trial = func?.getTrial(trialId);
-			if (trial === undefined) {
-				return [false, false];
-			}
-			trial.returnAtLine = line;
-			trial.returnTime = time;
-			const t1 = trial.time;
-			time -= t1;
-			let textTime = (time / 1000).toFixed(0) + "µs";
-			if (time > 1000000000)
-				textTime = (time / 1000000000).toFixed(3) + "s";
-			else if (time > 1000000)
-				textTime = (time / 1000000).toFixed(3) + "ms";
-
-			outline.addInspectInformation(this.inspects, trialId, file, func!.range[0], "execute time: "+textTime);
 			this.DB.functionReturn(trialId, file, funName, time, line, match[6], match[7]);
 			refreshInspects = true;
 			return [refreshInspects, refreshOutlineTree];
 		}
 		regexp = new RegExp("^\\[(\\d+)\\]\\[(\\d+)\\] DEKU Inspect: Function (return|end): (.+):(\\d+):(.+)$", "g");
 		match = regexp.exec(line);
-		if (match != null) {
+		if (match !== null) {
 			let time = Number.parseInt(match[1]);
 			const trialId = Number.parseInt(match[2]);
 			const file = match[4];
 			const funName = match[6];
-			const func = this.inspects.getFunction(file, funName);
-			const trial = func?.getTrial(trialId);
-			if (trial === undefined) {
-				return [false, false];
-			}
 			let line = Number.parseInt(match[5]);
-			trial.returnAtLine = line;
-			if (match[3] === "return") {
-				outline.addInspectInformation(this.inspects, trialId, file, line, "return here");
-			}
-			trial.returnTime = time;
-			const t1 = trial.time;
-			time -= t1;
-			let textTime = (time / 1000).toFixed(0) + "µs";
-			if (time > 1000000000)
-				textTime = (time / 1000000000).toFixed(3) + "s";
-			else if (time > 1000000)
-				textTime = (time / 1000000).toFixed(3) + "ms";
-
-			outline.addInspectInformation(this.inspects, trialId, file, func!.range[0], "execute time: "+textTime);
 			this.DB.functionReturn(trialId, file, funName, time, line);
 			refreshInspects = true;
 			return [refreshInspects, refreshOutlineTree];
 		}
 		regexp = new RegExp("^\\[(\\d+)\\]\\[(\\d+)\\] DEKU Inspect: Function stacktrace:(.+):(\\w+) (.+)$", "g");
 		match = regexp.exec(line);
-		if (match != null) {
+		if (match !== null) {
 			const trialId = Number.parseInt(match[2]);
 			const file = match[3];
 			const funName = match[4];
-			const func = this.inspects.getFunction(file, funName);
 			const text = match[5];
-			const trial = func?.getTrial(trialId);
-
-			if (trial === undefined) {
-				return [false, false];
-			}
-
-			trial.stacktraceSum = CRC32.str(text);
-			text.substring(0, text.length - 1).split(',').forEach(line => {
-				line = line.split(" ")[0];
-				if (trial.stacktrace.length !== 0 || line.split("+")[0] !== funName) {
-					trial.stacktrace.push(line);
-				}
-			});
-			this.DB.addStacktrace(trialId, file, funName, text, trial.stacktraceSum);
+			this.DB.addStacktrace(trialId, file, funName, text, CRC32.str(text));
 			refreshOutlineTree = true;
 			return [refreshInspects, refreshOutlineTree];
 		}
@@ -355,13 +286,6 @@ export class Deku
 			const pid = Number.parseInt(match[4]);
 			const procName = match[5];
 
-			const func = this.inspects.getFunction(file, funName);
-			const trial = func?.getTrial(trialId);
-			if (trial === undefined) {
-				return [false, false];
-			}
-
-			trial.procName = procName;
 			this.DB.functionPID(trialId, file, funName, pid, procName);
 			refreshInspects = true;
 			return [refreshInspects, refreshOutlineTree];
@@ -387,6 +311,7 @@ export class Deku
 		child.stdout.on('data', (data: Buffer) => {
 			let refreshInspects = false;
 			let refreshOutlineTree = false;
+			this.DB.beginTransaction();
 			for (let i = 0; i < data.length; i++) {
 				if (data[i] === 10) {
 					const line = buffer.slice(0, bufferIndex).toString().trim();
@@ -399,6 +324,7 @@ export class Deku
 				}
 				buffer[bufferIndex++] = data[i];
 			}
+			this.DB.commitTransaction();
 			if (refreshInspects) {
 				this.refreshSideViews();
 				this.showInspectsForCurrentEditor();

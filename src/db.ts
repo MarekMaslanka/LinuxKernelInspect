@@ -24,8 +24,8 @@ export class Database {
 			"id"	INTEGER NOT NULL UNIQUE,\
 			"file_id"	INTEGER NOT NULL,\
 			"name"	TEXT NOT NULL,\
-			"line_start"	INTEGER NOT NULL,\
-			"line_end"	INTEGER NOT NULL,\
+			"line_start"	INTEGER,\
+			"line_end"	INTEGER,\
 			FOREIGN KEY("file_id") REFERENCES "file"("id") ON UPDATE CASCADE ON DELETE CASCADE,\
 			PRIMARY KEY("id" AUTOINCREMENT),\
 			UNIQUE(file_id, name)\
@@ -73,15 +73,166 @@ export class Database {
 			this.insertCb);
 	}
 
-	public getAllTrials(callbackfn: (row: any) => void) {
-		// this.db.each("SELECT * FROM stacktrace INNER JOIN trial ON trial.id = stacktrace.trial_id INNER JOIN function ON function.id = trial.function_id INNER JOIN file ON file.id = function.file_id", (err, row) => {
-		// 	callbackfn(row);
-		// });
+	public addFunToInspect(file: string, funName: string): void {
+		this.db.serialize(() => {
+			this.db.run("INSERT OR IGNORE INTO file (path, source, commit_hash) VALUES ($path, $source, $commit)", {
+				$path: file,
+				$source: "",
+				$commit: ""
+			}, this.insertCb);
+			this.db.run("INSERT OR IGNORE INTO function (name, file_id) VALUES ($name, (SELECT id FROM file WHERE path = $path LIMIT 1))", {
+				$name: funName,
+				$path: file
+			}, this.insertCb);
+		});
 	}
 
-	public getInspects(trialId: number, callbackfn: (row: any) => void) {
-		this.db.each("SELECT * FROM inspect INNER JOIN trial ON trial.id = inspect.trial_id INNER JOIN function ON function.id = trial.function_id INNER JOIN file ON file.id = function.file_id WHERE inspect.trial_id = " + trialId, (err, row) => {
+	public getFiles(callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT * FROM file", (_err, row) => {
 			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getFuncs(file: string, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT *, function.id AS fun_id FROM function INNER JOIN file ON file.id = function.file_id WHERE file.path = $path", {
+			$path: file
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getTrials(funId: string, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT *, process.name AS proc_name FROM trial INNER JOIN process ON trial.pid = process.pid WHERE function_id = $funId", {
+			$funId: funId
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getInspects(funId: number, trialId: number, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT * FROM inspect WHERE function_id = $funId AND trial_id = $trialId", {
+			$funId: funId,
+			$trialId: trialId
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getFuncsWithReturns(file: string, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+// 		this.db.each("SELECT DISTINCT trial.function_id, f.name FROM trial INNER JOIN (SELECT distinct name, id FROM function) f ON trial.function_id = f.id WHERE function_id IN (SELECT id FROM function WHERE file_id = (SELECT id FROM file WHERE path = $path))", {
+		this.db.each("SELECT DISTINCT trial.function_id, function.name FROM trial INNER JOIN function ON trial.function_id = function.id WHERE function_id IN (SELECT id FROM function WHERE file_id = (SELECT id FROM file WHERE path = $path))", {
+			$path: file
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getReturnsForFun(funId: number, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT DISTINCT return_line FROM trial WHERE function_id = $funId", {
+			$funId: funId
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getTrialsForReturnLine(funId: number, retLine: number, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT trial.*, process.name AS proc_name FROM trial INNER JOIN process ON trial.pid = process.pid WHERE function_id = $funId AND return_line = $retLine", {
+			$funId: funId,
+			$retLine: retLine
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getStacktracesForFun(funId: number, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT DISTINCT stacktrace.sum, stacktrace.stacktrace, trial.function_id FROM trial JOIN stacktrace ON trial.stacktrace = stacktrace.sum WHERE function_id = $funId", {
+			$funId: funId
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getTrialsWithStacktace(funId: number, sum: number, callbackfn: (row: any) => void, done: (err: Error | null) => void) {
+		this.db.each("SELECT trial.*, process.name AS proc_name FROM trial INNER JOIN process ON trial.pid = process.pid WHERE function_id = $funId AND stacktrace = $sum", {
+			$funId: funId,
+			$sum: sum
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			done(err);
+		});
+	}
+
+	public getFunction(funId: number, callbackfn: (row: any) => void, done?: (err: Error | null) => void) {
+		this.db.each("SELECT * FROM function WHERE id = $funId", {
+			$funId: funId
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			if (done) {
+				done(err);
+			}
+		});
+	}
+
+	public getTrialByTime(time: number, callbackfn: (row: any) => void, done?: (err: Error | null) => void) {
+		this.db.each("SELECT *, trial.id AS trial_id FROM trial INNER JOIN function ON trial.function_id = function.id INNER JOIN file ON file.id = function.file_id WHERE time = $time", {
+			$time: time
+		}, (_err, row) => {
+			callbackfn(row);
+		}, (err: Error | null) => {
+			if (err) {
+				this.error(err.message);
+			}
+			if (done) {
+				done(err);
+			}
 		});
 	}
 
@@ -98,13 +249,8 @@ export class Database {
 
 	public startTrial(trialId: number, file: string, line: number, endLine: number, funName: string, time: number, calledFrom: string): void {
 		this.db.serialize(() => {
-			this.db.run("INSERT OR IGNORE INTO file (path, source, commit_hash) VALUES ($path, $source, $commit)", {
-				$path: file,
-				$source: "",
-				$commit: ""
-			}, this.insertCb);
-			this.db.run("INSERT OR IGNORE INTO function (name, line_start, line_end, file_id) VALUES ($name, $lineStart, $lineEnd, (SELECT id FROM file WHERE path = $path LIMIT 1))", {
-				$name: funName,
+			this.db.run("UPDATE function SET line_start = $lineStart, line_end = $lineEnd WHERE name = $funName AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1)", {
+				$funName: funName,
 				$lineStart: line,
 				$lineEnd: endLine,
 				$path: file
@@ -144,31 +290,28 @@ export class Database {
 			varName = "";
 		}
 
-		this.db.serialize(() => {
-			this.db.run("INSERT INTO inspect (trial_id, function_id, line, var_name, var_value, msg) VALUES ($trialId, (SELECT id FROM function WHERE $line >= line_start AND $line <= line_end AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1), $line, $varName, $varValue, $msg)", {
-				$trialId: trialId,
-				$line: line,
-				$path: file,
-				$varName: varName,
-				$varValue: varValue,
-				$msg: msg
-			}, this.insertCb);
-		});
+		this.db.run("INSERT INTO inspect (trial_id, function_id, line, var_name, var_value, msg) VALUES ($trialId, (SELECT id FROM function WHERE $line >= line_start AND $line <= line_end AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1), $line, $varName, $varValue, $msg)", {
+			$trialId: trialId,
+			$line: line,
+			$path: file,
+			$varName: varName,
+			$varValue: varValue,
+			$msg: msg
+		}, this.insertCb);
 	}
 
 	public functionReturn(trialId: number, file: string, funName: string, time: number, line?: number, key?: string, value?: string) {
 		if (!line) {
 			line = 0;
 		}
-		this.db.serialize(() => {
-			this.db.run("UPDATE trial SET return_time = $time, return_line = $line WHERE id = $trialId AND function_id = (SELECT id FROM function WHERE name = $funName AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1)", {
-				$time: time,
-				$line: line,
-				$trialId: trialId,
-				$funName: funName,
-				$path: file
-			}, this.insertCb);
-		});
+		this.db.run("UPDATE trial SET return_time = $time, return_line = $line WHERE id = $trialId AND function_id = (SELECT id FROM function WHERE name = $funName AND file_id = (SELECT id FROM file WHERE path = $path LIMIT 1) ORDER BY id DESC LIMIT 1)", {
+			$time: time,
+			$line: line,
+			$trialId: trialId,
+			$funName: funName,
+			$path: file
+		}, this.insertCb);
+
 		if (key) {
 			this.addLineInspect(trialId, file, line, key, value);
 		}
@@ -187,6 +330,14 @@ export class Database {
 				$path: file
 			}, this.insertCb);
 		});
+	}
+
+	public beginTransaction() {
+		this.db.exec("BEGIN TRANSACTION");
+	}
+
+	public commitTransaction() {
+		this.db.exec("COMMIT");
 	}
 
 	private insertCb(err: Error | null) {

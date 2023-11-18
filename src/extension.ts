@@ -17,30 +17,30 @@ let functionsMap = new Map<number, string>();
 const window = vscode.window;
 const workspace = vscode.workspace;
 
-const inspects = new outline.LensInspectionRoot();
-
-const treeProvider = new outline.InspectOutlineProvider(undefined);
-const kernelInspectTreeProvider = new outline.KernelInspectTreeProvider(undefined);
-const functionReturnsTreeProvider = new outline.ReturnsOutlineProvider(undefined);
-const stacktraceTreeProvider = new outline.StacktraceTreeProvider(undefined);
-
 const DB = new Database();
+
+const fileInspectsTreeProvider = new outline.InspectsTreeProvider(DB);
+const kernelInspectTreeProvider = new outline.RegisteredInspectTreeProvider(DB);
+const functionReturnsTreeProvider = new outline.ReturnsTreeProvider(DB);
+const stacktraceTreeProvider = new outline.StacktraceTreeProvider(DB);
+
 const deku = new Deku();
 const ftrace = new Ftrace();
 const treeDecorator = new TreeDecorationProvider();
 
 const histogramTreeProvider = new outline.HistogramTreeProvider(ftrace);
 
+const editorInspects = new Map<string, Map<number, number>>();
+
 export function activate(context: vscode.ExtensionContext) {
 	let activeEditor = vscode.window.activeTextEditor;
-	deku.inspects = inspects;
 	deku.showInspectsForCurrentEditor = showInspectsForCurrentEditor;
 	deku.refreshSideViews = refreshSideViews;
 
 	// const codelensProvider = new CodelensProvider();
 	// vscode.languages.registerCodeLensProvider("*", codelensProvider);
-	inspectFiles.read();
-	kernelInspectTreeProvider.refresh(inspectFiles.inspections);
+	inspectFiles.read(DB);
+	kernelInspectTreeProvider.refresh();
 	workspace.onWillSaveTextDocument(event => {
 		const openEditor = vscode.window.visibleTextEditors.filter(
 			editor => editor.document.uri === event.document.uri
@@ -67,30 +67,29 @@ export function activate(context: vscode.ExtensionContext) {
 	}, null, context.subscriptions);
 
 	const sqlProvider = new SqlSideViewProvider(context.extensionUri, DB, rawTime => {
-		const time = inspects.findTrial(vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri), rawTime);
-		if (!time) {
-			vscode.window.showErrorMessage("Unknown error");
-			return;
-		}
+		DB.getTrialByTime(rawTime, row => {
+			let inspects = editorInspects.get(row.path);
+			if (!inspects) {
+				inspects = new Map<number, number>();
+				editorInspects.set(row.path, inspects);
+			}
+			inspects.set(row.function_id, row.trial_id);
 
-		///////////////
+			const workspaceFolder = workspace.workspaceFolders![0];
+			workspace.openTextDocument(workspaceFolder.uri.path + "/" + row.path).then(doc =>
+			{
+				window.showTextDocument(doc).then(editor =>
+				{
+					showInspectsForCurrentEditor();
 
-		time.fun.showInspectFor = time;
-		const lines = new Map<number, string[]>();
-		inspects.files.forEach(file => {
-			if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri))
-				file.functions.forEach(func => {
-					func.showInspectFor.lines.forEach((values, line) => {
-						lines.set(line, values);
-					});
+					const visibleLines = editor.visibleRanges;
+					const range = new vscode.Range(row.line_start - 1, 0, row.line_end, 0);
+					if (!visibleLines![0].intersection(range)) {
+						editor!.revealRange(range);
+					}
 				});
+			});
 		});
-		showInspectInformation(lines);
-		const editor = vscode.window.activeTextEditor;
-		const visibleLines = editor?.visibleRanges;
-		const range = new vscode.Range(time.fun.range[0] - 1, 0, time.fun.range[1], 0);
-		if (!visibleLines![0].intersection(range))
-			editor!.revealRange(range);
 	});
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
@@ -113,7 +112,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	vscode.commands.registerCommand('kernelinspect.inspect_function', (path: string, fun: string, pattern: string) => {
 		inspectFiles.addInspect(path, fun, pattern);
-		kernelInspectTreeProvider.refresh(inspectFiles.inspections);
+		kernelInspectTreeProvider.refresh();
 		startInspecting();
 	});
 
@@ -123,26 +122,28 @@ export function activate(context: vscode.ExtensionContext) {
 
 	vscode.commands.registerCommand('kernelinspect.remove_inspect_function', (path: string, fun: string) => {
 		inspectFiles.removeInspect(path, fun);
-		kernelInspectTreeProvider.refresh(inspectFiles.inspections);
+		kernelInspectTreeProvider.refresh();
 	});
 
-	vscode.commands.registerCommand('kernelinspect.show_inspect_for', (time: outline.LensInspectionTrial) => {
-		time.fun.showInspectFor = time;
-		const lines = new Map<number, string[]>();
-		inspects.files.forEach(file => {
-			if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri))
-				file.functions.forEach(func => {
-					func.showInspectFor.lines.forEach((values, line) => {
-						lines.set(line, values);
-					});
-				});
+	vscode.commands.registerCommand('kernelinspect.show_inspect_for_trial', (funId: number, trialId: number) => {
+		const uri = workspace.asRelativePath(window.activeTextEditor!.document.uri);
+		let inspects = editorInspects.get(uri);
+		if (!inspects) {
+			inspects = new Map<number, number>();
+			editorInspects.set(uri, inspects);
+		}
+		inspects.set(funId, trialId);
+
+		showInspectsForCurrentEditor();
+
+		DB.getFunction(funId, row => {
+			const editor = window.activeTextEditor;
+			const visibleLines = editor?.visibleRanges;
+			const range = new vscode.Range(row.line_start - 1, 0, row.line_end, 0);
+			if (!visibleLines![0].intersection(range)) {
+				editor!.revealRange(range);
+			}
 		});
-		showInspectInformation(lines);
-		const editor = vscode.window.activeTextEditor;
-		const visibleLines = editor?.visibleRanges;
-		const range = new vscode.Range(time.fun.range[0] - 1, 0, time.fun.range[1], 0);
-		if (!visibleLines![0].intersection(range))
-			editor!.revealRange(range);
 	});
 
 	vscode.commands.registerCommand('kernelinspect.open_file_fun', (file: string, funcName: string) => {
@@ -174,7 +175,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	vscode.window.registerTreeDataProvider(
 		"documentOutline",
-		treeProvider
+		fileInspectsTreeProvider
 	);
 	vscode.window.registerTreeDataProvider(
 		"inspects.file",
@@ -193,25 +194,25 @@ export function activate(context: vscode.ExtensionContext) {
 		histogramTreeProvider
 	);
 
-	vscode.languages.registerHoverProvider('c', {
-		provideHover(document, position, token) {
-			const range = document.getWordRangeAtPosition(position);
-			const word = document.getText(range);
-			const fun = inspects.findFunction(vscode.workspace.asRelativePath(document.uri), position.line + 1);
-			if (!fun || fun.range[0] != position.line + 1/* && fun!.name != word*/)
-				return undefined;
-			// https://stackoverflow.com/questions/54792391/vs-code-hover-extension-implement-hoverprovider
-			const markdown = new vscode.MarkdownString(`<span style="color:#fff;background-color:#666;">&nbsp;&nbsp;&nbsp;Stack trace:&nbsp;&nbsp;&nbsp;</span>`);
-			markdown.appendText("\n");
-			// markdown.appendText("\n______________________________\n");
-			// markdown.appendMarkdown(`**Stack trace:**\n`);
-			fun.showInspectFor.stacktrace.forEach(line => {
-				markdown.appendMarkdown(`* ${line}\n`);
-			});
-			markdown.isTrusted = true;
-			return new vscode.Hover(markdown, new vscode.Range(position, position));
-		}
-	});
+	// vscode.languages.registerHoverProvider('c', {
+	// 	provideHover(document, position, token) {
+	// 		const range = document.getWordRangeAtPosition(position);
+	// 		const word = document.getText(range);
+	// 		const fun = inspects.findFunction(vscode.workspace.asRelativePath(document.uri), position.line + 1);
+	// 		if (!fun || fun.range[0] != position.line + 1/* && fun!.name != word*/)
+	// 			return undefined;
+	// 		// https://stackoverflow.com/questions/54792391/vs-code-hover-extension-implement-hoverprovider
+	// 		const markdown = new vscode.MarkdownString(`<span style="color:#fff;background-color:#666;">&nbsp;&nbsp;&nbsp;Stack trace:&nbsp;&nbsp;&nbsp;</span>`);
+	// 		markdown.appendText("\n");
+	// 		// markdown.appendText("\n______________________________\n");
+	// 		// markdown.appendMarkdown(`**Stack trace:**\n`);
+	// 		fun.showInspectFor.stacktrace.forEach(line => {
+	// 			markdown.appendMarkdown(`* ${line}\n`);
+	// 		});
+	// 		markdown.isTrusted = true;
+	// 		return new vscode.Hover(markdown, new vscode.Range(position, position));
+	// 	}
+	// });
 
 	setupStatusbar(deku, context.subscriptions, activeEditor);
 	deku.init(DB);
@@ -220,29 +221,7 @@ export function activate(context: vscode.ExtensionContext) {
 		debouncedSideViews();
 	};
 
-	// remove?
-	DB.getAllTrials(row => {
-		// console.log(row);
-		const func = inspects.getOrCreateFunc(0, row.path, row.name, row.line_start, row.line_end);
-		const time = row.time as number;
-		const timeStr = time.toString();
-		const trial = new outline.LensInspectionTrial(0, func, time, timeStr);
-		trial.returnAtLine = row.return_line ? row.return_line : row.line_end;
-		trial.returnTime = row.return_time;
-		trial.stacktrace = row.stacktrace;
-		trial.stacktraceSum = row.stacktraceSum;
-		func.trials.push(trial);
-		addInspectForTrial(trial, row.line_start, "execute time: "+"execTime");
-		if (row.return_line) {
-			addInspectForTrial(trial, row.line_end, "return here");
-		}
-		DB.getInspects(row.trial_id, row => {
-			// console.log(row);
-			const msg = row.var_name + ": " + row.var_value;
-
-			addInspectForTrial(trial, row.line, msg);
-		});
-	});
+	refreshSideViews();
 }
 
 function getCurrentFunctionsList(uri?: vscode.Uri) {
@@ -251,11 +230,6 @@ function getCurrentFunctionsList(uri?: vscode.Uri) {
 	if (functionsMap.size == 0)
 		functionsMap = generateFunctionList(uri!.fsPath);
 	return functionsMap;
-}
-
-function addInspectForTrial(trial: outline.LensInspectionTrial, line: number, value: string, name?: string) {
-	const vars = trial.lines.get(line) != undefined ? trial.lines.get(line) : trial.lines.set(line, []).get(line);
-	vars!.push(value);
 }
 
 function getDecorationMessage(msg: any) {
@@ -319,17 +293,9 @@ function refreshSideViews() {
 		histogramTreeProvider.updatePath("", []);
 	}
 
-	for(const file of inspects.files) {
-		if (file.file == path) {
-			treeProvider.refresh(file);
-			functionReturnsTreeProvider.refresh(file);
-			stacktraceTreeProvider.refresh(file);
-			return;
-		}
-	}
-	treeProvider.refresh(undefined);
-	functionReturnsTreeProvider.refresh(undefined);
-	stacktraceTreeProvider.refresh(undefined);
+	fileInspectsTreeProvider.refresh(path);
+	functionReturnsTreeProvider.refresh(path);
+	stacktraceTreeProvider.refresh(path);
 }
 
 function showInspectInformation(lines: Map<number, string[]>) {
@@ -342,23 +308,28 @@ function showInspectInformation(lines: Map<number, string[]>) {
 	vscode.window.activeTextEditor?.setDecorations(decorationTypeX, allinspects);
 }
 
-function clearCodeLensInspections(file: string, start: number, end: number) {
-	inspects.files = [];
-	vscode.window.activeTextEditor?.setDecorations(decorationTypeX, []);
-}
-
 function showInspectsForCurrentEditor() {
 	const lines = new Map<number, string[]>();
-	inspects.files.forEach(file => {
-		if (file.file == vscode.workspace.asRelativePath(vscode.window.activeTextEditor!.document.uri))
-			file.functions.forEach(func => {
-				if (func.trials.length)
-					func.trials[func.trials.length - 1].lines.forEach((values, line) => {
-						lines.set(line, values);
-					});
+
+	const uri = workspace.asRelativePath(window.activeTextEditor!.document.uri);
+	let inspects = editorInspects.get(uri);
+	if (!inspects) {
+		inspects = new Map<number, number>();
+		editorInspects.set(uri, inspects);
+	}
+	inspects.forEach((trialId: number, funId: number) => {
+		DB.getInspects(funId, trialId, row => {
+			const text = row.var_name + ": " + row.var_value;
+			const values = lines.get(row.line);
+				if (values) {
+					values.push(text);
+				} else {
+					lines.set(row.line, [text]);
+				}
+			}, (_err: Error | null): void => {
+				showInspectInformation(lines);
 			});
 	});
-	showInspectInformation(lines);
 }
 
 function startInspecting() {

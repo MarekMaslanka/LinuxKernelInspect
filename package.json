@@ -78,7 +78,7 @@
         },
         {
           "id": "inspects.file",
-          "name": "Inspects"
+          "name": "Registered inspections"
         },
         {
           "type": "webview",

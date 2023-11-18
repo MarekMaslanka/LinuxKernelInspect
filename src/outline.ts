@@ -1,455 +1,282 @@
 import * as vscode from "vscode";
 import { EventEmitter, Event } from "vscode";
 import * as path from 'path';
-import { InspectFunction } from "./DekuIntegration";
 import { Ftrace, TracedFunction } from "./Ftrace";
+import { Database } from "./db";
 
-export class LensInspectionTrial {
-	trialId!: number;
-	time!: number;
-	textTime!: string;
-	fun: LensInspectionFunction;
-	lines: Map<number, string[]> = new Map<number, string[]>();
-	stacktrace: string[] = [];
-	stacktraceSum = 0;
-	returnAtLine = 0;
-	returnTime!: number;
-	timeDiff = 0;
-	calledFrom = "";
-	procName = "";
+function genItemForTrial(time: number, returnTime: number, procName: string, trialId: number, funId: number): vscode.TreeItem {
+	const strTime = (time / 1000000000).toFixed(6);
+	const item = new vscode.TreeItem(
+		"["+procName+"] "+strTime, vscode.TreeItemCollapsibleState.None
+	);
+	item.command = {
+		command: 'kernelinspect.show_inspect_for_trial',
+		arguments: [funId, trialId],
+		title: 'Open FTP Resource',
+		tooltip: 'Open FTP Resource1'
+	};
+	item.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
+	item.iconPath = new vscode.ThemeIcon('history');
+	item.description = ((returnTime - time) / 1000000).toFixed(3)+"ms";
+	// item.resourceUri = vscode.Uri.parse(item.fun.name+item.stacktraceSum+item.fun.name+"_AAA?"+item.timeDiff+"ms");
 
-	public constructor(trialId: number, fun: LensInspectionFunction, time: number, textTime: string) {
-		this.trialId = trialId;
-		this.fun = fun;
-		this.time = time;
-		this.textTime = textTime;
-	}
+	return item;
 }
 
-class LensInspectionFunction {
-	name!: string;
-	range: number[] = [];
-	trials: LensInspectionTrial[] = [];
-	showInspectFor!: LensInspectionTrial;
-
-	public getTrial(trialId: number)
-	{
-		let trial = this.trials.find(it => it.trialId === trialId);
-		if (trial) {
-			return trial;
-		}
-		console.log("ERROR: Can't find trial by id: " + trialId);
-		return undefined;
-	}
-}
-
-class LensInspectionFile {
-	file!: string;
-	functions: LensInspectionFunction[] = [];
-
-	public constructor(path: string, fun: LensInspectionFunction) {
-		this.file = path;
-		this.functions.push(fun);
-	}
-}
-
-class ReturnItem {
-	public constructor(public time: LensInspectionTrial) {}
-}
-
-class StacktraceItem {
-	public constructor(public time: LensInspectionTrial, public index: number) {}
-}
-
-// class HistogramItem {
-// 	public constructor(public name: string, public trace: TracedFunction) {}
-// }
-
-export class LensInspectionRoot {
-	files: LensInspectionFile[] = [];
-
-	public findFunction(filePath: string, line: number): LensInspectionFunction | undefined {
-		let result;
-		this.files.forEach(file => {
-			if (file.file == filePath) {
-				file.functions.forEach(func => {
-					if (func.range[0] <= line && func.range[1] >= line) {
-						result = func;
-						return;
-					}
-				});
-			}
-		});
-		return result;
-	}
-
-	public getFunction(filePath: string, name: string): LensInspectionFunction | undefined {
-		let result;
-		this.files.forEach(file => {
-			if (file.file == filePath) {
-				file.functions.forEach(func => {
-					if (func.name == name) {
-						result = func;
-						return;
-					}
-				});
-			}
-		});
-		return result;
-	}
-
-	public getOrCreateFunc(trialId: number, filePath: string, funName: string, lineStart: number, lineEnd: number): LensInspectionFunction {
-		let inspectFunc: LensInspectionFunction | undefined = undefined;
-		this.files.forEach(file => {
-			if (file.file === filePath) {
-				file.functions.forEach(func => {
-					if (func.name === funName && func.range[0] === lineStart && func.range[1] === lineEnd) {
-						inspectFunc = func;
-						return;
-					}
-				});
-			}
-		});
-		if (inspectFunc !== undefined) {
-			return inspectFunc;
-		}
-
-		inspectFunc = new LensInspectionFunction();
-		inspectFunc.name = funName;
-		inspectFunc.range = [lineStart, lineEnd];
-		inspectFunc.showInspectFor = new LensInspectionTrial(trialId, inspectFunc, 0, "");
-
-		this.files.forEach(file => {
-			if (file.file == filePath) {
-				file.functions.push(inspectFunc!);
-				return inspectFunc;
-			}
-		});
-		this.files.push(new LensInspectionFile(filePath, inspectFunc));
-
-		return inspectFunc;
-	}
-
-	public findTrial(filePath: string, time: number): LensInspectionTrial | undefined {
-		let result;
-		this.files.forEach(file => {
-			if (file.file == filePath) {
-				file.functions.forEach(func => {
-					for (let i = 0; i < func.trials.length; i++) {
-						if (func.trials[i].time === time) {
-							result = func.trials[i];
-							return;
-						}
-					}
-				});
-			}
-		});
-		return result;
-	}
-}
-
-export class InspectOutlineProvider implements vscode.TreeDataProvider<any> {
+export class InspectsTreeProvider implements vscode.TreeDataProvider<any> {
 
 	private changeEvent = new EventEmitter<void>();
+	private file = "";
 
-	constructor(private inspections: LensInspectionFile | undefined) {
+	constructor(private db: Database) {
 	}
 
 	public get onDidChangeTreeData(): Event<void> {
 		return this.changeEvent.event;
 	}
-	public refresh(inspectsForFile: LensInspectionFile | undefined): any {
-		this.inspections = inspectsForFile;
+
+	public refresh(file: string): any {
+		this.file = file;
 		this.changeEvent.fire();
 	}
 
 	getTreeItem(item: any): vscode.TreeItem {
-		if (item instanceof LensInspectionFunction) {
-			const titem = new vscode.TreeItem(
-				item.name,
-				item.trials.length > 1
-					? vscode.TreeItemCollapsibleState.Collapsed
-					: vscode.TreeItemCollapsibleState.None
-			);
-			if (item.trials.length === 1)
-				titem.command = {
-					command: 'kernelinspect.show_inspect_for',
-					arguments: [item.trials[0]],
-					title: 'getTreeItem Title',
-					tooltip: 'getTreeItem Tooltip'
-				};
-			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
-			titem.iconPath = new vscode.ThemeIcon('json');
-			titem.resourceUri = vscode.Uri.parse(item.name+item.trials[0].time+"_AAA?"+item.trials.length);
-			return titem;
-		} else if (item instanceof LensInspectionTrial) {
-			const titem = new vscode.TreeItem(
-				"["+item.procName+"] "+item.textTime, vscode.TreeItemCollapsibleState.None
-			);
-			titem.command = {
-				command: 'kernelinspect.show_inspect_for',
-				arguments: [item],
-				title: 'Open FTP Resource',
-				tooltip: 'Open FTP Resource1'
+		return item;
+	}
+
+	genTreeItem(funName: string, funId: string): vscode.TreeItem {
+		const item = new vscode.TreeItem(
+			funName,
+			vscode.TreeItemCollapsibleState.Collapsed
+		);
+		item.id = "fun."+funName+"."+funId;
+		item.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+		item.iconPath = new vscode.ThemeIcon('json');
+		return item;
+	}
+
+	getChildren(element?: any): Thenable<vscode.TreeItem[]> {
+		return new Promise(resolve => {
+			const list :vscode.TreeItem[] = [];
+			const done = (_err: Error | null): void => {
+				resolve(list);
 			};
-			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
-			titem.iconPath = new vscode.ThemeIcon('history');
-			titem.description = ((item.returnTime - item.time) / 1000000).toFixed(3)+"ms";
-			titem.resourceUri = vscode.Uri.parse(item.fun.name+item.stacktraceSum+item.fun.name+"_AAA?"+item.timeDiff+"ms");
-
-			return titem;
-		}
-		else
-			return new vscode.TreeItem("Unknown");
-	}
-
-	getChildren(element?: any): Thenable<[]> {
-		let childs: any;
-		if (element instanceof LensInspectionFile)
-			childs = element.functions;
-		else if (element instanceof LensInspectionFunction)
-			childs = element.trials;
-		else
-			childs = this.inspections?.functions;
-		return Promise.resolve(childs);
+			if (element instanceof vscode.TreeItem && element.id?.startsWith("fun.")) {
+				this.db.getTrials(element.id.split(".")[2], row => {
+					list.push(genItemForTrial(row.time, row.return_time, row.proc_name, row.id, row.function_id));
+				}, done);
+			} else {
+				this.db.getFuncs(this.file, row => {
+					list.push(this.genTreeItem(row.name, row.fun_id));
+				}, done);
+			}
+		});
 	}
 }
 
-export class KernelInspectTreeProvider implements vscode.TreeDataProvider<any> {
+export class RegisteredInspectTreeProvider implements vscode.TreeDataProvider<any> {
 
 	private changeEvent = new EventEmitter<void>();
 
-	constructor(private inspections: InspectFunction[] | undefined) {
+	constructor(private db: Database) {
 	}
 
 	public get onDidChangeTreeData(): Event<void> {
 		return this.changeEvent.event;
 	}
-	public refresh(inspectsForFile: InspectFunction[] | undefined): any {
-		this.inspections = inspectsForFile;
+
+	public refresh(): any {
 		this.changeEvent.fire();
 	}
 
 	getTreeItem(item: any): vscode.TreeItem {
-		if (item instanceof InspectFunction) {
-			const titem = new vscode.TreeItem(
-				item.file,
-				vscode.TreeItemCollapsibleState.Collapsed
-			);
-			return titem;
-		}
-		const titem = new vscode.TreeItem(item.file + " " + item.fun);
-		titem.command = {
+		return item;
+	}
+
+	genItemForFile(path: string): vscode.TreeItem {
+		return new vscode.TreeItem(
+			path,
+			vscode.TreeItemCollapsibleState.Collapsed
+		);
+	}
+
+	genItemForFunction(path: string, fun: string): vscode.TreeItem {
+		const item = new vscode.TreeItem(path + " " + fun);
+		item.command = {
 			command: 'kernelinspect.open_file_fun',
-			arguments: [item.file, item.fun],
+			arguments: [path, fun],
 			title: 'Open inspected function',
 		};
-		titem.iconPath = new vscode.ThemeIcon('circle-outline');
-		titem.contextValue = "functionInspect"
-		// titem.resourceUri = vscode.Uri.parse(item.file+"_AAA?"+item.trials.length);
-		return titem;
+		item.iconPath = new vscode.ThemeIcon('circle-outline');
+		item.contextValue = "functionInspect";
+		// item.resourceUri = vscode.Uri.parse(item.file+"_AAA?"+item.trials.length);
+		return item;
 	}
 
-	getChildren(element?: any): Thenable<[]> {
-		let childs: any;
-		if (element instanceof InspectFunction)
-			childs = element.file;
-		else
-			childs = this.inspections;
-		return Promise.resolve(childs);
+	getChildren(element?: any): Thenable<vscode.TreeItem[]> {
+		return new Promise(resolve => {
+			const list :vscode.TreeItem[] = [];
+			const done = (_err: Error | null): void => {
+				resolve(list);
+			};
+			if (element instanceof vscode.TreeItem) {
+				this.db.getFuncs(element.label!.toString(), row => {
+					list.push(this.genItemForFunction(row.path, row.name));
+				}, done);
+			} else {
+				this.db.getFiles(row => {
+					list.push(this.genItemForFile(row.path));
+				}, done);
+			}
+		});
 	}
 }
 
-export class ReturnsOutlineProvider implements vscode.TreeDataProvider<any> {
+export class ReturnsTreeProvider implements vscode.TreeDataProvider<any> {
 
 	private changeEvent = new EventEmitter<void>();
+	private file = "";
 
-	constructor(private inspections: LensInspectionFile | undefined) {
+	constructor(private db: Database) {
 	}
 
 	public get onDidChangeTreeData(): Event<void> {
 		return this.changeEvent.event;
 	}
-	public refresh(inspectsForFile: LensInspectionFile | undefined): any {
-		this.inspections = inspectsForFile;
+
+	public refresh(file: string): any {
+		this.file = file;
 		this.changeEvent.fire();
 	}
 
 	getTreeItem(item: any): vscode.TreeItem {
-		if (item instanceof LensInspectionFunction) {
-			const titem = new vscode.TreeItem(
-				item.name,
-				item.trials.length > 1
-					? vscode.TreeItemCollapsibleState.Collapsed
-					: vscode.TreeItemCollapsibleState.None
-			);
-			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
-			titem.iconPath = new vscode.ThemeIcon('code');
-			return titem;
-		} else if (item instanceof ReturnItem) {
-			const titem = new vscode.TreeItem(
-				"return at line: "+item.time.returnAtLine, vscode.TreeItemCollapsibleState.Collapsed
-			);
-			titem.iconPath = new vscode.ThemeIcon('indent');
-			return titem;
-		} else if (item instanceof LensInspectionTrial) {
-			const titem = new vscode.TreeItem(
-				"["+item.procName+"] "+item.textTime, vscode.TreeItemCollapsibleState.None
-			);
-			titem.command = {
-				command: 'kernelinspect.show_inspect_for',
-				arguments: [item],
-				title: 'Open FTP Resource',
-				tooltip: 'Open FTP Resource1'
-			};
-			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
-			titem.iconPath = new vscode.ThemeIcon('history');
-			return titem;
-		}
-		else
-			return new vscode.TreeItem("Unknown");
+		return item;
 	}
 
-	getChildren(element?: any): Thenable<[]> {
-		let childs: any;
-		if (element instanceof LensInspectionFunction) {
-			const retLines: number[] = [];
-			const items: ReturnItem[] = [];
-			element.trials.forEach(trial => {
-				if (!retLines.includes(trial.returnAtLine)) {
-					retLines.push(trial.returnAtLine);
-					items.push(new ReturnItem(trial));
-				}
-			});
-			childs = items;
-		} else if (element instanceof ReturnItem) {
-			const items: LensInspectionTrial[] = [];
-			element.time.fun.trials.forEach(trial => {
-				if (trial.returnAtLine === element.time.returnAtLine) {
-					items.push(trial);
-				}
-			});
-			childs = items;
-		} else if (this.inspections) {
-			const items: LensInspectionFunction[] = [];
-			this.inspections?.functions.forEach(func => {
-				let found = false;
-				for (let i = 0; i < items.length; i++) {
-					if (func.name === items[i].name) {
-						found = true;
-						break;
-					}
-				}
-				if (!found)	{
-					items.push(func);
-				}
-			});
-			childs = items;
-		}
-		return Promise.resolve(childs);
+	genTreeItem(funName: string, funId: number): vscode.TreeItem {
+		const item = new vscode.TreeItem(
+			funName,
+			vscode.TreeItemCollapsibleState.Collapsed
+		);
+		item.id = "fun."+funName+"."+funId;
+		item.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
+		item.iconPath = new vscode.ThemeIcon('json');
+		return item;
+	}
+
+	genItemForReturn(retLine: number, funId: number): vscode.TreeItem {
+		const item = new vscode.TreeItem(
+			"return at line: " + retLine,
+			vscode.TreeItemCollapsibleState.Collapsed
+		);
+		item.iconPath = new vscode.ThemeIcon('indent');
+		item.id = "ret."+retLine+"."+funId;
+		return item;
+	}
+
+	getChildren(element?: any): Thenable<vscode.TreeItem[]> {
+		return new Promise(resolve => {
+			const list :vscode.TreeItem[] = [];
+			const done = (_err: Error | null): void => {
+				resolve(list);
+			};
+			if (element instanceof vscode.TreeItem && element.id?.startsWith("ret.")) {
+				const returnLine = Number.parseInt(element.id.split(".")[1]);
+				const funId = Number.parseInt(element.id.split(".")[2]);
+				this.db.getTrialsForReturnLine(funId, returnLine, row => {
+					list.push(genItemForTrial(row.time, row.return_time, row.proc_name, row.id, row.function_id));
+				}, done);
+			} else if (element instanceof vscode.TreeItem && element.id?.startsWith("fun.")) {
+				const funId = Number.parseInt(element.id.split(".")[2]);
+				this.db.getReturnsForFun(funId, row => {
+					list.push(this.genItemForReturn(row.return_line, funId));
+				}, done);
+			} else {
+				this.db.getFuncsWithReturns(this.file, row => {
+					list.push(this.genTreeItem(row.name, row.function_id));
+				}, done);
+			}
+		});
 	}
 }
+
 
 export class StacktraceTreeProvider implements vscode.TreeDataProvider<any> {
 
 	private changeEvent = new EventEmitter<void>();
+	private file = "";
 
-	constructor(private inspections: LensInspectionFile | undefined) {
+	constructor(private db: Database) {
 	}
 
 	public get onDidChangeTreeData(): Event<void> {
 		return this.changeEvent.event;
 	}
-	public refresh(inspectsForFile: LensInspectionFile | undefined): any {
-		this.inspections = inspectsForFile;
+
+	public refresh(file: string): any {
+		this.file = file;
 		this.changeEvent.fire();
 	}
 
 	getTreeItem(item: any): vscode.TreeItem {
-		if (item instanceof LensInspectionFunction) {
-			const titem = new vscode.TreeItem(
-				item.name,
-				item.trials.length > 1
-					? vscode.TreeItemCollapsibleState.Collapsed
-					: vscode.TreeItemCollapsibleState.None
-			);
-			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'func.png');
-			titem.iconPath = new vscode.ThemeIcon('json');
-			return titem;
-		} else if (item instanceof StacktraceItem) {
-			const titem = new vscode.TreeItem(
-				"#"+item.index, vscode.TreeItemCollapsibleState.Collapsed
-			);
-			titem.tooltip = "";
-			titem.description = "";
-			item.time.stacktrace.forEach(line => {
-				titem.tooltip += line + "\n";
-			});
-			let cnt = 0;
-			item.time.stacktrace.forEach(fun => {
-				if (cnt < 4 && fun.indexOf("+") > 0) {
-					titem.description += fun.split("+")[0]+", ";
-					cnt++;
-				}
-			});
-			titem.description += "...";
-			titem.iconPath = new vscode.ThemeIcon('layers');
-			return titem;
-		} else if (item instanceof LensInspectionTrial) {
-			const titem = new vscode.TreeItem(
-				"["+item.procName+"] "+item.textTime, vscode.TreeItemCollapsibleState.None
-			);
-			titem.command = {
-				command: 'kernelinspect.show_inspect_for',
-				arguments: [item],
-				title: 'Open FTP Resource',
-				tooltip: 'Open FTP Resource1'
-			};
-			titem.iconPath = path.join(__filename, '..', '..', 'resources', 'time.png');
-			titem.iconPath = new vscode.ThemeIcon('history');
-			return titem;
-		}
-		else
-			return new vscode.TreeItem("Unknown");
+		return item;
 	}
 
-	getChildren(element?: any): Thenable<[]> {
-		let childs: any;
-		if (element instanceof LensInspectionFunction) {
-			const stackSum: number[] = [];
-			const items: StacktraceItem[] = [];
-			element.trials.forEach(time => {
-				if (!stackSum.includes(time.stacktraceSum)) {
-					stackSum.push(time.stacktraceSum);
-					items.push(new StacktraceItem(time, items.length+1));
-				}
-			});
-			childs = items;
-		} else if (element instanceof StacktraceItem) {
-			const items: LensInspectionTrial[] = [];
-			element.time.fun.trials.forEach(time => {
-				if (time.stacktraceSum == element.time.stacktraceSum) {
-					items.push(time);
-				}
-			});
-			childs = items;
-		} else if (this.inspections) {
-			const items: LensInspectionFunction[] = [];
-			this.inspections?.functions.forEach(func => {
-				let found = false;
-				for (let i = 0; i < items.length; i++) {
-					if (func.name === items[i].name) {
-						found = true;
-						break;
-					}
-				}
-				if (!found)	{
-					items.push(func);
-				}
-			});
-			childs = items;
-		}
-		return Promise.resolve(childs);
+	genTreeItem(funName: string, funId: string): vscode.TreeItem {
+		const item = new vscode.TreeItem(
+			funName,
+			vscode.TreeItemCollapsibleState.Collapsed
+		);
+		item.id = "fun."+funName+"."+funId;
+		item.iconPath = new vscode.ThemeIcon('json');
+		return item;
+	}
+
+	genItemForStacktrace(index: number, sum: number, stacktrace: string, funId: number): vscode.TreeItem {
+		const item = new vscode.TreeItem(
+			"#"+index, vscode.TreeItemCollapsibleState.Collapsed
+		);
+		item.tooltip = "";
+		item.description = "";
+		stacktrace.split(",").forEach(line => {
+			item.tooltip += line + "\n";
+		});
+		let cnt = 0;
+		stacktrace.split(",").forEach(fun => {
+			if (cnt < 4 && fun.indexOf("+") > 0) {
+				item.description += fun.split("+")[0]+", ";
+				cnt++;
+			}
+		});
+		item.description += "...";
+		item.iconPath = new vscode.ThemeIcon('layers');
+		item.id = "stack."+sum+"."+funId;
+		return item;
+	}
+
+	getChildren(element?: any): Thenable<vscode.TreeItem[]> {
+		return new Promise(resolve => {
+			const list :vscode.TreeItem[] = [];
+			const done = (_err: Error | null): void => {
+				resolve(list);
+			};
+			if (element instanceof vscode.TreeItem && element.id?.startsWith("stack.")) {
+				const sum = Number.parseInt(element.id.split(".")[1]);
+				const funId = Number.parseInt(element.id.split(".")[2]);
+				this.db.getTrialsWithStacktace(funId, sum, row => {
+					list.push(genItemForTrial(row.time, row.return_time, row.proc_name, row.id, row.function_id));
+				}, done);
+			} else if (element instanceof vscode.TreeItem && element.id?.startsWith("fun.")) {
+				const funId = Number.parseInt(element.id.split(".")[2]);
+				this.db.getStacktracesForFun(funId, row => {
+					list.push(this.genItemForStacktrace(list.length + 1, row.sum, row.stacktrace, row.function_id));
+				}, done);
+			} else {
+				this.db.getFuncsWithReturns(this.file, row => {
+					list.push(this.genTreeItem(row.name, row.function_id));
+				}, done);
+			}
+		});
 	}
 }
 
@@ -555,20 +382,6 @@ export class HistogramTreeProvider implements vscode.TreeDataProvider<any> {
 		return Promise.resolve(childs);
 	}
 }
-
-export function addInspectInformation(inspects: LensInspectionRoot, trialId: number, file: string, line: number, value: string, name?: string) {
-	const func = inspects.findFunction(file, line);
-	const trial = func?.getTrial(trialId);
-	if (trial === undefined) {
-		return;
-	}
-	const linesMap = trial.lines;
-	if (linesMap!.get(line) === undefined) { // TODO: check
-		linesMap!.set(line, []);
-	}
-	linesMap!.get(line)?.push(value);
-}
-
 const decorationType = vscode.window.createTextEditorDecorationType({
 	backgroundColor: "#007acc33",
 	isWholeLine: true,
